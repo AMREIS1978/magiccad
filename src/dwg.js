@@ -23,7 +23,7 @@ export async function exportDwg(project, destination, directory) {
   try {
     const input = join(temporary, 'project.lines'), output = join(temporary, 'project.dwg');
     const flattened = dxfToProject(projectToDxf(project));
-    await writeFile(input, flattened.entities.map(e => `${e.x1} ${-e.y1} ${e.x2} ${-e.y2} ${e.layer}\n`).join(''));
+    await writeFile(input, flattened.entities.map(e => e.type==='arc' ? `A ${e.cx} ${-e.cy} ${e.radius} ${e.startAngle} ${e.endAngle} ${e.layer}\n` : `L ${e.x1} ${-e.y1} ${e.x2} ${-e.y2} ${e.layer}\n`).join(''));
     await run('magiccad-dwg-write', [input, output], directory);
     const bytes = await readFile(output);
     if (bytes.subarray(0, 6).toString() !== 'AC1015') throw new Error('A conversão não produziu DWG R2000.');
@@ -31,7 +31,7 @@ export async function exportDwg(project, destination, directory) {
     await run('dwg2dxf', ['-o', join(temporary, 'check.dxf'), output], directory);
     const expected = dxfToProject(projectToDxf(project));
     const actual = dxfToProject(await readFile(join(temporary, 'check.dxf'), 'utf8'));
-    const canonical = p => p.entities.map(e => JSON.stringify({ points: [[e.x1,e.y1],[e.x2,e.y2]].sort((a,b) => a[0]-b[0] || a[1]-b[1]), layer: e.layer })).sort();
+    const canonical = p => p.entities.map(e => JSON.stringify(e.type==='arc'?{type:'arc',cx:e.cx,cy:e.cy,radius:e.radius,startAngle:e.startAngle,endAngle:e.endAngle,layer:e.layer}:{ points: [[e.x1,e.y1],[e.x2,e.y2]].sort((a,b) => a[0]-b[0] || a[1]-b[1]), layer: e.layer })).sort();
     if (JSON.stringify(canonical(expected)) !== JSON.stringify(canonical(actual))) throw new Error('A releitura do DWG não preservou a geometria e as camadas. O destino não foi alterado.');
     // The native dialog confirms overwrites; replace the destination only after successful validation.
     const sibling = `${destination}.${randomUUID()}.tmp`;

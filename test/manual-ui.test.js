@@ -97,7 +97,8 @@ test('operador: conversa por Enter, coordenadas, ORTHO, OSNAP, janela, zoom all 
     assert.equal(await page.locator('#door-width').inputValue(),'0.9');assert.equal(await page.locator('#door-offset').inputValue(),'1');assert.equal(await page.locator('#door-wall').inputValue(),'north');
     await page.locator('#door-form button[type=submit]').click();assert.equal(await page.locator('.door-leaf').count(),1);
     const path=await page.locator('.wall').getAttribute('d');assert.equal((path.match(/M/g)||[]).length,3);
-    await command('U');assert.equal(await page.locator('.door-leaf').count(),0);await command('REDO');assert.equal(await page.locator('.door-leaf').count(),1);
+    await command('U');assert.equal(await page.locator('.door-leaf').count(),0);await command('REDO');assert.equal(await page.locator('.door-leaf').count(),1);assert.equal(await page.locator('.door-swing').count(),1);assert.equal(await page.locator('.door-frame').count(),2);assert.match(await page.locator('.door-swing').getAttribute('d'),/A840,840/);
+    assert.equal(await page.locator('.door-leaf').getAttribute('points'),'1870,0 1830,0 1830,840 1870,840');
     assert.deepEqual(errors,[]);
     await page.screenshot({path:'/workspace/magiccad-manual.png'});
   } finally { await browser?.close(); await new Promise(resolve=>server.close(resolve)); }

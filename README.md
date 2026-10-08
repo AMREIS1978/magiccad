@@ -20,10 +20,10 @@ O arranque verifica estes ficheiros antes de instalar. Caso o npm falhe depois d
 ## O que já existe
 
 - Divisões retangulares: dimensões interiores explícitas, espessura de paredes, posição, área e cotas visuais.
-- Modo manual com linha de comandos: LINE/L, RECTANG/REC, MOVE/M, COPY/CO, OFFSET/O, ERASE/E, UNDO/U e REDO; linhas contínuas, coordenadas absolutas/relativas, seleção por janela/crossing, ORTHO, OSNAP e zoom.
+- Modo manual com linha de comandos: LINE/L, RECTANG/REC, MOVE/M, COPY/CO, OFFSET/O, TRIM/TR, ERASE/E, UNDO/U e REDO; linhas contínuas, coordenadas absolutas/relativas, seleção por janela/crossing, ORTHO, OSNAP e zoom.
 - Conversa local curta: reconhece pedidos de divisões e pergunta por medidas em falta. O modelo Naive Bayes é treinado com exemplos em `data/intents.pt.json`; não é um LLM geral.
 - Guardar/abrir projetos `.magiccad.json`, com validação e aviso de alterações por guardar.
-- DWG real: exportação R2000 de linhas e contornos através da API pública LibreDWG; reabertura e comparação automática de coordenadas/camadas antes de gravar o destino.
+- DWG real: exportação R2000 de linhas, contornos e arcos de portas através da API pública LibreDWG; reabertura e comparação automática de coordenadas/camadas antes de gravar o destino.
 - Importação de DWG com LINE/LWPOLYLINE retilíneas 2D e unidades declaradas em mm/cm/m. Outros objetos são recusados para impedir perda silenciosa.
 
 Não exporta nomes, áreas ou cotas visuais para DWG nesta versão. Os contornos importados não recuperam as divisões semânticas; guarda também o projeto MagicCAD. Não há ainda paredes ligadas, janelas, cotas associativas, impressão, LLM geral, autopilot, 3D, renderização ou conformidade RJUE validada.
@@ -108,7 +108,7 @@ Seleciona por clique ou por arrasto: esquerda→direita exige inclusão total; d
 
 A conversa aceita Enter para enviar e Shift+Enter para nova linha. Exemplos: `quero uma sala de quatro por cinco metros com paredes de vinte cm`; ou `quero uma sala de 4x5` → indicar `metros` → indicar `20 cm`. A IA local continua específica: não é um LLM geral, nem executa um projeto completo autónomo. O modo manual segue princípios conhecidos do CAD, mas **não tem ainda todas as ferramentas nem compatibilidade integral de operação com AutoCAD**.
 
-O formato guardado v2 continua a conservar Y interno para baixo, para manter os projetos anteriores. A interface manual, a posição de divisões e a troca DWG apresentam coordenadas cartesianas por transformação; os projetos v1 são migrados em memória para v2, sem alterar as coordenadas nem reescrever o ficheiro original. A versão v2 impede que versões antigas descartem portas ao abrir o projeto.
+O formato guardado v3 continua a conservar Y interno para baixo, para manter os projetos anteriores. A interface manual, a posição de divisões e a troca DWG apresentam coordenadas cartesianas por transformação; os projetos v1/v2 são migrados em memória para v3, sem alterar as coordenadas nem reescrever o ficheiro original. A versão v3 impede que versões antigas descartem a espessura da folha, a moldura e os arcos ao abrir o projeto.
 
 ## Evolução
 
@@ -129,6 +129,12 @@ OFFSET suporta linhas e recusa resultados que não possam ser representados exat
 
 Depois de criar uma divisão, o assistente sugere inserir uma porta, copiar ou enquadrar. Usa a divisão selecionada como contexto e mostra respostas clicáveis. `Inserir uma porta` → `90 cm` → `Parede superior` → `A 1 metro do canto` → `Dobradiça no fim` prepara a confirmação. As medidas são sempre explícitas. Uma proposta inválida pede correção e não altera o projeto.
 
-As portas pertencem às divisões MagicCAD; criam um vão real entre os contornos da parede, ombreiras e folha a 90° para o interior. A posição mede-se desde o canto interior esquerdo nas paredes horizontais ou superior nas verticais. Não há ainda arco de abertura, portas em linhas DWG importadas, janelas ou ligação entre paredes adjacentes. São recusados vãos sobrepostos, fora da parede ou folhas que não caibam no interior. Mover/copiar a divisão preserva as portas; desfazer, guardar e reabrir também. No DWG exportam-se os contornos do vão e a folha; a importação restitui linhas, sem reconstruir a semântica da porta.
+As portas pertencem às divisões MagicCAD; criam um vão real entre os contornos da parede, ombreiras e folha com espessura, molduras com rebaixo e arco verdadeiro a 90° para o interior. A posição mede-se desde o canto interior esquerdo nas paredes horizontais ou superior nas verticais. Não há ainda portas em linhas DWG importadas, janelas ou ligação entre paredes adjacentes. São recusados vãos sobrepostos, fora da parede ou folhas que não caibam no interior. Mover/copiar a divisão preserva as portas; desfazer, guardar e reabrir também. No DWG exportam-se os contornos do vão, a moldura, a folha com espessura e o arco ARC; a importação restitui linhas e arcos de 90° alinhados com os eixos, sem reconstruir a semântica da porta.
 
 TRIM atua em segmentos de linha; pode usar contornos de divisões como limites, mas não corta a divisão paramétrica. Suporta interseções dentro dos segmentos, sem prolongamento implícito. Interseções fracionárias em milímetros são recusadas. A operação manual aproxima-se dos fluxos CAD clássicos, mas não é compatibilidade integral com AutoCAD.
+
+### Representação de portas — 0.3.1
+
+A largura indicada é o **vão na alvenaria**. A folha mede esse vão menos duas larguras de moldura: um vão de 900 mm com molduras de 30 mm corresponde a 840 mm entre molduras. A espessura da folha (40 mm por defeito) e a largura da moldura (30 mm por defeito) podem ser alteradas na confirmação. A moldura tem um rebaixo; a folha aberta é um retângulo, e o arco liga as posições fechada e aberta em torno da dobradiça. As oito combinações de parede/dobradiça usam a mesma geometria.
+
+Os projetos antigos continuam a abrir; portas sem esses campos recebem os valores predefinidos indicados. No DWG o arco é uma entidade ARC, sem aproximação por segmentos. Para usar o novo exportador no Windows, recompila o adaptador com `scripts/setup-windows.ps1`; o executável nativo anterior não conhece o protocolo de arcos. TRIM continua limitado a limites lineares; a seleção explícita de arcos como limites é recusada. ARC importado pode ser selecionado, movido, copiado, apagado e exportado, mas só são suportados quartos de círculo alinhados com os eixos.

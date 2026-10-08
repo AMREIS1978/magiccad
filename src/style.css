@@ -8,3 +8,5 @@ select{font:inherit;color:inherit;background:#112126;border:1px solid #405156;bo
 .suggestions{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px}.suggestions button{font-size:11px;padding:7px 9px;border-color:#52796a;color:#c5f0da;text-align:left;background:#1b302c}.suggestions button:hover{background:#365747}
 
 .wall,.selected .wall{stroke:none}.wall-outline{stroke:#c1d3ca;stroke-width:1;vector-effect:non-scaling-stroke;cursor:pointer}.selected .wall-outline{stroke:#e7d199;stroke-width:3}.assistant h1{font-size:28px;margin-bottom:12px}.assistant .intro{font-size:12px}.context-card{font-size:11px;color:#c5f0da;border-left:2px solid #86bda5;padding:8px 10px;background:#203731;margin:12px 0 0}
+
+.door-leaf{fill:#14232b}.door-frame{fill:#849f97;stroke:#c1d3ca;stroke-width:1;vector-effect:non-scaling-stroke;cursor:pointer}.door-swing{fill:none;stroke:#a9bcb5;stroke-width:1;vector-effect:non-scaling-stroke;cursor:pointer}.selected .door-frame,.selected .door-swing{stroke:#e7d199;stroke-width:2}

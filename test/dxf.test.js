@@ -26,3 +26,12 @@ test('escalas declaradas são convertidas e precisão incompatível é recusada'
   assert.notEqual(invalid, text);
   assert.throws(() => dxfToProject(invalid), /precisão/);
 });
+test('DXF preserva arco verdadeiro e medidas da porta; recusa outros ângulos', async () => {
+ const {insertDoor,doorGeometry}=await import('../src/core.js');
+ const h=new History();h.add({id:'r',type:'room',name:'Sala',x:0,y:0,width:4000,height:5000,thickness:200});
+ insertDoor(h,'r',{wall:'south',width:900,offset:1000,hinge:'end',leafThickness:45,frameWidth:35});
+ const text=projectToDxf(h.project),p=dxfToProject(text),actual=p.entities.find(e=>e.type==='arc'),expected=doorGeometry(h.project.entities[0],h.project.entities[0].doors[0]).arc;
+ assert.deepEqual({...actual,id:'door-arc'},expected);assert.equal(p.entities.filter(e=>e.type==='line').length,26);
+ const single=new History();single.add(expected);const singleDxf=projectToDxf(single.project);
+ assert.throws(()=>dxfToProject(singleDxf.replace(`50\n${expected.startAngle}\n`,'50\n45\n')),/arcos/);
+});

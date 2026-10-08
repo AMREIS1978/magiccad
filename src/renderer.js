@@ -1,4 +1,4 @@
-import { History, mm, metres, roomGeometry, roomSegments, doorGeometry, insertDoor, validateProject } from './core.js';
+import { History, mm, metres, roomGeometry, roomSegments, doorGeometry, arcPath, arcPoints, insertDoor, validateProject } from './core.js';
 import { LocalAssistant } from './assistant.js';
 import { CadSession, scalar, zoomView, segments, selectWindow, erase, trimLine } from './cad.js';
 const assistant = new LocalAssistant(), $ = id => document.getElementById(id);
@@ -43,17 +43,19 @@ function render() {
       const { interior: i, exterior: o, area } = roomGeometry(entity), rectangle = r => `M${r.x},${r.y}h${r.width}v${r.height}h${-r.width}z`;
       group.append(node('path', { d: rectangle(o) + rectangle(i) + (entity.doors ?? []).map(d => { const g=doorGeometry(entity,d); return rectangle({x:Math.min(g.start.x,g.outerEnd.x),y:Math.min(g.start.y,g.outerEnd.y),width:Math.abs(g.outerEnd.x-g.start.x),height:Math.abs(g.outerEnd.y-g.start.y)}); }).join(''), 'fill-rule': 'evenodd', class: 'wall' }));
       for (const [a,b] of roomSegments(entity,false)) group.append(node('line',{x1:a.x,y1:a.y,x2:b.x,y2:b.y,class:'wall-outline'}));
-      for (const d of entity.doors ?? []) { const g=doorGeometry(entity,d); group.append(node('line',{x1:g.hinge.x,y1:g.hinge.y,x2:g.tip.x,y2:g.tip.y,class:'door-leaf'})); }
+      for (const d of entity.doors ?? []) { const g=doorGeometry(entity,d); for(const frame of g.frames) group.append(node('polygon',{points:frame.map(p=>`${p.x},${p.y}`).join(' '),class:'door-frame'})); group.append(node('polygon',{points:g.leaf.map(p=>`${p.x},${p.y}`).join(' '),class:'door-leaf'})); group.append(node('path',{d:arcPath(g.arc),class:'door-swing'})); }
       group.append(node('text', { x: i.x + i.width / 2, y: i.y + i.height / 2 - 100, class: 'room-label' }, entity.name));
       group.append(node('text', { x: i.x + i.width / 2, y: i.y + i.height / 2 + 170, class: 'room-area' }, `${area.toLocaleString('pt-PT', { maximumFractionDigits: 6 })} m²`));
       group.append(node('text', { x: i.x + i.width / 2, y: o.y - 180, class: 'dimension', 'text-anchor': 'middle' }, `${metres(i.width)} m`));
       group.append(node('text', { x: o.x - 180, y: i.y + i.height / 2, class: 'dimension', transform: `rotate(-90 ${o.x - 180} ${i.y + i.height / 2})`, 'text-anchor': 'middle' }, `${metres(i.height)} m`));
-    } else group.append(node('line', { x1: entity.x1, y1: entity.y1, x2: entity.x2, y2: entity.y2, class: 'cad-line' }));
+    } else if(entity.type==='arc') group.append(node('path',{d:arcPath(entity),class:'door-swing'}));
+    else group.append(node('line', { x1: entity.x1, y1: entity.y1, x2: entity.x2, y2: entity.y2, class: 'cad-line' }));
     $('entities').append(group);
   }
   const geometry = history.project.entities.flatMap(segments);
   const middlePoints = geometry.map(([a,b]) => ({ x: (a.x+b.x)/2, y: (a.y+b.y)/2 })).filter(p => Number.isSafeInteger(p.x) && Number.isSafeInteger(p.y));
-  snapPoints = [...new Map([...geometry.flat(), ...middlePoints].map(p => [`${p.x},${p.y}`, p])).values()];
+  const arcs=history.project.entities.flatMap(e=>e.type==='arc'?[e]:e.type==='room'?(e.doors??[]).map(d=>doorGeometry(e,d).arc):[]);
+  snapPoints = [...new Map([...geometry.flat(), ...middlePoints, ...arcs.flatMap(a=>[...arcPoints(a),{x:a.cx,y:a.cy}])].map(p => [`${p.x},${p.y}`, p])).values()];
   $('undo').disabled = !history.past.length; $('redo').disabled = !history.future.length; $('delete').disabled = false;
   document.title = `${JSON.stringify(history.project) === saved ? '' : '• '}MagicCAD`;
   const rooms=history.project.entities.filter(e=>e.type==='room'), chosen=rooms.find(r=>cad.selection.has(r.id));
@@ -93,6 +95,7 @@ function proposeDoor(command = {}) {
   const chosen=rooms.find(r=>r.id===command.roomId) ?? rooms.find(r=>command.roomName && r.name.toLocaleLowerCase('pt-PT')===command.roomName.toLocaleLowerCase('pt-PT')) ?? rooms.find(r=>cad.selection.has(r.id));
   if (chosen) select.value=chosen.id;
   $('door-width').value=command.width === undefined ? '' : String(command.width/1000);
+  $('door-leaf-thickness').value=String((command.leafThickness ?? 40)/10); $('door-frame-width').value=String((command.frameWidth ?? 30)/10);
   $('door-offset').value=command.offset === undefined ? '' : String(command.offset/1000);
   $('door-wall').value=command.wall ?? ''; $('door-hinge').value=command.hinge ?? '';
   $('door-error').textContent=''; cad.cancel(); render(); $('door-dialog').showModal();
@@ -102,7 +105,7 @@ $('cancel-door').onclick=cancel;
 $('door-form').onsubmit=event=>{
   event.preventDefault();
   try {
-    insertDoor(history,$('door-room').value,{wall:$('door-wall').value,width:mm($('door-width').value),offset:scalar($('door-offset').value,'m'),hinge:$('door-hinge').value});
+    insertDoor(history,$('door-room').value,{wall:$('door-wall').value,width:mm($('door-width').value),offset:scalar($('door-offset').value,'m'),hinge:$('door-hinge').value,leafThickness:mm($('door-leaf-thickness').value,'cm'),frameWidth:mm($('door-frame-width').value,'cm')});
     $('door-dialog').close(); render(); fit(); message('Porta inserida. Queres continuar nesta divisão?',false,['Inserir outra porta','Mostra tudo','Desfazer']); status('Porta inserida. U para desfazer.');
   } catch(error){$('door-error').textContent=error.message;}
 };
@@ -164,6 +167,8 @@ function preview(p) {
   if(previous && cad.mode==='line') cad.direction={x:p.x-previous.x,y:p.y-previous.y};
   if (previous && cad.mode === 'rect') $('preview').append(node('rect', { x: Math.min(previous.x, p.x), y: Math.min(previous.y, p.y), width: Math.abs(p.x - previous.x), height: Math.abs(p.y - previous.y), class: 'preview-line', fill: 'none' }));
   else if (previous && ['move', 'copy'].includes(cad.mode)) {
+    const arcs=history.project.entities.filter(e=>cad.selection.has(e.id)).flatMap(e=>e.type==='arc'?[e]:e.type==='room'?(e.doors??[]).map(d=>doorGeometry(e,d).arc):[]);
+    for(const arc of arcs) $('preview').append(node('path',{d:arcPath({...arc,cx:arc.cx+p.x-previous.x,cy:arc.cy+p.y-previous.y}),class:'preview-line',fill:'none'}));
     for (const entity of history.project.entities.filter(e => cad.selection.has(e.id))) for (const [a, b] of segments(entity)) $('preview').append(node('line', { x1: a.x + p.x - previous.x, y1: a.y + p.y - previous.y, x2: b.x + p.x - previous.x, y2: b.y + p.y - previous.y, class: 'preview-line' }));
   } else if (previous && cad.mode === 'line') $('preview').append(node('line', { x1: previous.x, y1: previous.y, x2: p.x, y2: p.y, class: 'preview-line' }));
   if (snapped) { const size = 5 / $('canvas').getScreenCTM().a; $('preview').append(node('rect', { x: snapped.x - size, y: snapped.y - size, width: size * 2, height: size * 2, class: 'snap-marker' })); }
@@ -272,7 +277,7 @@ $('import-dwg').onclick = async () => {
     if (result) {
       history = new History(result.project); saved = ''; cad = new CadSession(history); cad.unit=$('drawing-unit').value; assistant.cancel();
       $('filename').textContent = result.name; render(); fit();
-      status(`DWG importado: ${history.project.entities.length} linhas. Guarda em MagicCAD para continuar o projeto.`);
+      status(`DWG importado: ${history.project.entities.length} objetos 2D. Guarda em MagicCAD para continuar o projeto.`);
     }
   } catch (error) { status(`Não foi possível abrir DWG: ${error.message}`); }
   finally { $('import-dwg').disabled = false; }

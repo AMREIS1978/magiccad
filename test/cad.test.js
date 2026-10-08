@@ -123,3 +123,11 @@ test('mover e copiar divisões conserva as portas e permite desfazer o conjunto'
  move(h,selection,6000,-1000,true);assert.equal(h.project.entities.length,2);assert.equal(h.project.entities[1].x,6000);assert.deepEqual(h.project.entities[1].doors,original.entities[0].doors);h.undo();assert.deepEqual(h.project,original);
  move(h,selection,1000,2000);assert.equal(h.project.entities[0].y,2000);assert.deepEqual(h.project.entities[0].doors,original.entities[0].doors);h.undo();assert.deepEqual(h.project,original);
 });
+test('arcos: seleção cruza a curva, zoom enquadra e mover mantém raio e ângulos', () => {
+ const arc={id:'a',type:'arc',cx:0,cy:0,radius:1000,startAngle:0,endAngle:90,layer:'PORTAS'};
+ assert.deepEqual(selectWindow([arc],{x:800,y:-800},{x:600,y:-600}),['a']);
+ assert.deepEqual(selectWindow([arc],{x:400,y:-400},{x:200,y:-200}),[]);
+ assert.deepEqual(selectWindow([arc],{x:-1,y:-1001},{x:1001,y:1}),['a']);
+ const v=zoomView([arc],1);assert.ok(v.x<=0&&v.y<=-1000&&v.x+v.width>=1000&&v.y+v.height>=0);
+ const h=new History();h.add(arc);move(h,new Set(['a']),2000,3000);assert.equal(h.project.entities[0].cx,2000);assert.equal(h.project.entities[0].cy,3000);assert.equal(h.project.entities[0].radius,1000);h.undo();assert.deepEqual(h.project.entities[0],arc);
+});

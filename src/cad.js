@@ -1,4 +1,4 @@
-import { mm, LIMIT, roomSegments } from './core.js';
+import { mm, LIMIT, roomSegments, arcPoints, doorGeometry } from './core.js';
 export function scalar(text, defaultUnit = 'mm') {
   const match = text.trim().match(/^(-?)(\d+(?:[.,]\d+)?)(mm|cm|m)?$/i);
   if (!match) throw new Error('Medida inválida. Usa milímetros ou um sufixo: 4000, 400cm, 4m.');
@@ -27,13 +27,14 @@ export function parsePoint(text, base = null, defaultUnit = 'mm') {
 }
 export function segments(entity) {
   if (entity.type === 'line') return [[{ x: entity.x1, y: entity.y1 }, { x: entity.x2, y: entity.y2 }]];
+  if(entity.type==='arc') return [];
   return roomSegments(entity);
 }
 export function bounds(entities, labels = false) {
   if (!entities.length) return null;
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   for (const entity of entities) {
-    for (const segment of segments(entity)) for (const p of segment) { minX = Math.min(minX, p.x); minY = Math.min(minY, p.y); maxX = Math.max(maxX, p.x); maxY = Math.max(maxY, p.y); }
+    for (const p of [...segments(entity).flat(), ...(entity.type==='arc'?arcPoints(entity):[])]) { minX = Math.min(minX, p.x); minY = Math.min(minY, p.y); maxX = Math.max(maxX, p.x); maxY = Math.max(maxY, p.y); }
     if (labels && entity.type === 'room') { minX = Math.min(minX, entity.x - entity.thickness - 450); minY = Math.min(minY, entity.y - entity.thickness - 450); }
   }
   return { minX, minY, maxX, maxY };
@@ -56,11 +57,23 @@ function crosses(a, b, r) {
   }
   return true;
 }
+function arcCrosses(arc, r) {
+  const ends=arcPoints(arc), extent={minX:Math.min(...ends.map(p=>p.x)),maxX:Math.max(...ends.map(p=>p.x)),minY:Math.min(...ends.map(p=>p.y)),maxY:Math.max(...ends.map(p=>p.y))};
+  const inside=p=>p.x>=r.minX && p.x<=r.maxX && p.y>=r.minY && p.y<=r.maxY;
+  const quarter=p=>p.x>=extent.minX-1e-8 && p.x<=extent.maxX+1e-8 && p.y>=extent.minY-1e-8 && p.y<=extent.maxY+1e-8;
+  if(ends.some(inside)) return true;
+  const candidates=[];
+  for(const x of [r.minX,r.maxX]) {const sq=arc.radius**2-(x-arc.cx)**2;if(sq>=0){const dy=Math.sqrt(sq);candidates.push({x,y:arc.cy+dy},{x,y:arc.cy-dy});}}
+  for(const y of [r.minY,r.maxY]) {const sq=arc.radius**2-(y-arc.cy)**2;if(sq>=0){const dx=Math.sqrt(sq);candidates.push({x:arc.cx+dx,y},{x:arc.cx-dx,y});}}
+  return candidates.some(p=>inside(p)&&quarter(p));
+}
 export function selectWindow(entities, a, b) {
   const rectangle = { minX: Math.min(a.x, b.x), maxX: Math.max(a.x, b.x), minY: Math.min(a.y, b.y), maxY: Math.max(a.y, b.y) };
   const crossing = b.x < a.x;
   return entities.filter(entity => {
-    const geometry = segments(entity);
+    const geometry = segments(entity), arcs=entity.type==='arc'?[entity]:entity.type==='room'?(entity.doors??[]).map(d=>doorGeometry(entity,d).arc):[];
+    if(entity.type==='arc' && !crossing) return arcPoints(entity).every(p=>p.x>=rectangle.minX&&p.x<=rectangle.maxX&&p.y>=rectangle.minY&&p.y<=rectangle.maxY);
+    if(crossing && arcs.some(arc=>arcCrosses(arc,rectangle))) return true;
     return crossing ? geometry.some(([first, last]) => crosses(first, last, rectangle)) : geometry.every(segment => segment.every(p => p.x >= rectangle.minX && p.x <= rectangle.maxX && p.y >= rectangle.minY && p.y <= rectangle.maxY));
   }).map(entity => entity.id);
 }
@@ -73,6 +86,7 @@ export function move(history, selection, dx, dy, duplicate = false) {
   const translated = history.project.entities.filter(entity => !duplicate || selection.has(entity.id)).map(entity => {
     if (!selection.has(entity.id)) return entity;
     const identity = duplicate ? { id: crypto.randomUUID() } : {};
+    if(entity.type==='arc') return {...entity,...identity,cx:entity.cx+dx,cy:entity.cy+dy};
     return entity.type === 'room' ? { ...entity, ...identity, x: entity.x + dx, y: entity.y + dy } : { ...entity, ...identity, x1: entity.x1 + dx, y1: entity.y1 + dy, x2: entity.x2 + dx, y2: entity.y2 + dy };
   });
   history.commit({ ...history.project, entities: duplicate ? [...history.project.entities, ...translated] : translated });
@@ -92,6 +106,7 @@ export function offsetLine(history, selection, distance, side) {
 export function trimLine(history, targetId, cutters, point) {
   const target = history.project.entities.find(e=>e.id===targetId);
   if (!target || target.type !== 'line') throw new Error('TRIM corta linhas nesta versão; as paredes de divisões mantêm-se paramétricas.');
+  if(history.project.entities.some(e=>e.type==='arc'&&cutters.has(e.id))) throw new Error('TRIM ainda não usa arcos como limites. Seleciona apenas limites lineares.');
   const ax=BigInt(target.x1), ay=BigInt(target.y1), rx=BigInt(target.x2-target.x1), ry=BigInt(target.y2-target.y1);
   const cross=(x,y,u,v)=>x*v-y*u;
   const cuts=[];

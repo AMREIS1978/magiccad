@@ -45,7 +45,7 @@ ipcMain.handle('dwg:export', async (event, data) => {
 });
 ipcMain.handle('dwg:import', async event => {
   if (event.sender !== win.webContents) throw new Error('Pedido inválido.');
-  const choice = await dialog.showOpenDialog(win, { properties: ['openFile'], filters: [{ name: 'DWG · linhas e polilinhas 2D', extensions: ['dwg'] }] });
+  const choice = await dialog.showOpenDialog(win, { properties: ['openFile'], filters: [{ name: 'DWG · linhas, polilinhas e arcos de 90°', extensions: ['dwg'] }] });
   if (choice.canceled) return null;
   const { importDwg } = await import('./dwg.js');
   return { name: path.basename(choice.filePaths[0]), project: await importDwg(choice.filePaths[0], libreDwgDirectory()) };

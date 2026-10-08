@@ -30,10 +30,10 @@ A vista SVG não deve tornar-se a base de dados do projeto. As operações passa
 
 ## Evolução 3D e renderização
 
-Os formatos v1 e v2 são estritamente 2D; v2 acrescenta portas associadas a divisões e lê v1 sem mudar as coordenadas. Implementar migração explícita para um futuro modelo 3D, mantendo os ficheiros antigos:
+Os formatos v1, v2 e v3 são estritamente 2D; v2 acrescentou portas associadas a divisões, v3 acrescenta a espessura da folha, moldura e ARC, e lê v1/v2 sem mudar as coordenadas. Implementar migração explícita para um futuro modelo 3D, mantendo os ficheiros antigos:
 
 - Edifício, pisos, níveis/elevacões, espaços, paredes, lajes, coberturas e vãos com identificadores estáveis.
-- Coordenadas cartesianas 3D, sistema de referência, unidades/tolerâncias e transformação documentada para a vista 2D. Nos formatos guardados v1/v2, Y interno cresce para baixo; a interface manual 0.3 e a troca CAD transformam-no para coordenadas cartesianas; não tratar isto como coordenadas 3D finais.
+- Coordenadas cartesianas 3D, sistema de referência, unidades/tolerâncias e transformação documentada para a vista 2D. Nos formatos guardados v1/v2/v3, Y interno cresce para baixo; a interface manual 0.3 e a troca CAD transformam-no para coordenadas cartesianas; não tratar isto como coordenadas 3D finais.
 - Paredes com eixo/contorno, espessura, altura e materiais; portas e janelas pertencem a paredes. Divisões calculadas a partir de limites verificados.
 - Motor geométrico independente, interfaces para operações de sólidos e restrições. Investigar Open CASCADE e a sua licença LGPL antes de integrar; não embutir operações 3D no SVG.
 - Adaptadores de vistas produzem planta, corte e alçado do mesmo modelo. Projeções para apresentação nunca alteram dimensões do modelo.
@@ -76,3 +76,7 @@ Tudo deve usar componentes sem pagamento obrigatório. Distribuir MagicCAD sob G
 TRIM usa interseções de segmentos por aritmética inteira BigInt e valida os pontos de corte antes de aplicar. A unidade de introdução de comandos é escolhida na interface; o armazenamento permanece em milímetros. Distância direta em LINE usa a direção apontada pelo cursor. COPY aceita vários destinos.
 
 As portas são dados semânticos relativos a uma divisão: parede, offset ao canto, largura e dobradiça. Geometria única partilhada por seleção/snaps, desenho e exportação. O assistente recebe apenas divisões e IDs selecionados, mantém o pedido em curso, pede um campo em falta de cada vez, oferece respostas clicáveis e propõe confirmação. Continua a usar regras e um classificador local de intenções; não foi integrado um LLM nesta entrega.
+
+## Representação de portas 0.3.1
+
+Geometria partilhada: vão estrutural, molduras com rebaixo, retângulo da folha com espessura e arco de abertura de 90° em torno da dobradiça. O arco é exportado pelo adaptador nativo com a API pública dwg_add_ARC; a releitura compara centro, raio, ângulos e camada além das linhas. Nenhuma curva é discretizada para o DWG. O leitor aceita ARC de 90° alinhado com os eixos e recusa restantes casos. Coordenadas, raios e espessuras permanecem inteiros em mm; os ângulos são graus na aplicação e radianos na API nativa.

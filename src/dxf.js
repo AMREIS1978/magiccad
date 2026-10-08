@@ -1,17 +1,22 @@
-import { validateProject, roomSegments, emptyProject, LIMIT } from './core.js';
+import { validateProject, roomSegments, doorGeometry, emptyProject, LIMIT } from './core.js';
 import { DxfWriter, point3d, Units } from '@tarikjabiri/dxf';
 export function projectToDxf(project) {
   const data = validateProject(project);
   const drawing = new DxfWriter(); drawing.setUnits(Units.Millimeters);
   const layers = new Set(['0']);
-  function line(x1, y1, x2, y2, layer) {
+  function setLayer(layer) {
     if (!/^[A-Za-z0-9 _-]+$/.test(layer) || ['__proto__', 'constructor', 'prototype'].includes(layer)) throw new Error('Esta versão só exporta nomes de camadas ASCII simples.');
     if (!layers.has(layer)) { drawing.addLayer(layer, 7, 'CONTINUOUS'); layers.add(layer); }
-    drawing.setCurrentLayerName(layer); drawing.addLine(point3d(x1, -y1), point3d(x2, -y2));
+    drawing.setCurrentLayerName(layer);
+  }
+  function line(x1,y1,x2,y2,layer) { setLayer(layer);drawing.addLine(point3d(x1,-y1),point3d(x2,-y2)); }
+  function arc(a) {setLayer(a.layer);drawing.addArc(point3d(a.cx,-a.cy),a.radius,a.startAngle,a.endAngle);
   }
   for (const entity of data.entities) {
     if (entity.type === 'line') line(entity.x1, entity.y1, entity.x2, entity.y2, entity.layer ?? 'DESENHO');
+    else if(entity.type==='arc') arc(entity);
     else {
+      for(const door of entity.doors??[]) arc(doorGeometry(entity,door).arc);
       for (const [a,b] of roomSegments(entity)) line(a.x,a.y,b.x,b.y,'PAREDES');
     }
   }
@@ -47,6 +52,10 @@ export function dxfToProject(text) {
     if (current.type === 'LINE') {
       if ([10, 20, 11, 21].some(code => get(code) === undefined)) throw new Error('Linha DXF incompleta.');
       add([coordinate(get(10)), coordinate(get(20), true)], [coordinate(get(11)), coordinate(get(21), true)]);
+    } else if(current.type==='ARC') {
+      if([10,20,40,50,51].some(code=>get(code)===undefined)) throw new Error('Arco DXF incompleto.');
+      const angle=code=>{ const value=Number(get(code)),nearest=Math.round(value);if(!Number.isFinite(value)||Math.abs(value-nearest)>1e-6) throw new Error('Ângulo de arco não suportado.');return ((nearest%360)+360)%360;};
+      project.entities.push({id:`dwg-${project.entities.length+1}`,type:'arc',cx:coordinate(get(10)),cy:coordinate(get(20),true),radius:coordinate(get(40)),startAngle:angle(50),endAngle:angle(51),layer});
     } else if (current.type === 'LWPOLYLINE') {
       if (current.pairs.some(([code, value]) => [40, 41, 42, 43].includes(code) && Number(value) !== 0)) throw new Error('Polilinhas com arcos ou largura ainda não são suportadas.');
       const vertices = [];
