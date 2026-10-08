@@ -1,0 +1,26 @@
+{
+  "name": "magiccad",
+  "version": "0.1.0",
+  "private": true,
+  "description": "CAD 2D para arquitetura com comandos guiados em portugu\u00eas",
+  "type": "module",
+  "main": "src/main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test test/core.test.js test/assistant.test.js test/dxf.test.js",
+    "test:ui": "node --test test/ui.test.js",
+    "package:windows": "node scripts/package-windows.js",
+    "train:ai": "node scripts/train-ai.js",
+    "test:dwg": "node --test test/dwg.test.js",
+    "test:desktop": "node --test test/desktop.test.js"
+  },
+  "devDependencies": {
+    "@electron/packager": "20.3.0",
+    "electron": "44.7.0",
+    "playwright": "1.58.2"
+  },
+  "license": "GPL-3.0-or-later",
+  "dependencies": {
+    "@tarikjabiri/dxf": "2.9.0"
+  }
+}
