@@ -40,3 +40,21 @@ test('avaliação de intenções em frases não presentes no conjunto de treino'
   const correct = heldOut.filter(([text, intent]) => predict(model, text).intent === intent).length;
   assert.equal(correct, heldOut.length, `${correct}/${heldOut.length} intenções reconhecidas. Este conjunto pequeno não mede qualidade arquitetónica.`);
 });
+test('unidades omitidas são esclarecidas sem perder as dimensões; resposta curta completa as paredes', () => {
+  const ai = new LocalAssistant();
+  assert.match(ai.interpret('quero uma sala de 4x5').message, /metros/);
+  assert.equal(ai.interpret('metros').type, 'clarification');
+  const room = ai.interpret('20 cm'); assert.equal(room.type, 'room'); assert.equal(room.width, 4000); assert.equal(room.height, 5000); assert.equal(room.thickness, 200);
+});
+test('aceita medidas por extenso e responde a ajuda e enquadramento', () => {
+  const ai = new LocalAssistant();
+  const room = ai.interpret('quero uma sala de quatro por cinco metros com paredes de vinte cm');
+  assert.equal(room.type, 'room'); assert.equal(room.width, 4000); assert.equal(room.height, 5000);
+  assert.equal(ai.interpret('bom dia').type, 'answer'); assert.equal(ai.interpret('mostra tudo').type, 'zoom-all');
+});
+test('revisão de dimensões sem unidades pede esclarecimento e nunca reutiliza medidas antigas', () => {
+  const ai = new LocalAssistant(); ai.interpret('quero uma sala de 4x5 metros');
+  assert.match(ai.interpret('afinal 6x7').message, /metros/); ai.interpret('metros');
+  const result = ai.interpret('20 cm'); assert.equal(result.width,6000); assert.equal(result.height,7000);
+  assert.throws(() => ai.interpret('quero uma sala de -4x5 metros com paredes de 20 cm'));
+});

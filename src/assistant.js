@@ -1,10 +1,13 @@
 import model from './intent-model.js';
 import { predict, normalize } from './learning.js';
-import { parseCommand, mm } from './core.js';
-const number = '(\\d+(?:[.,]\\d+)?)';
+import { parseCommand, mm, validateEntity } from './core.js';
+const number = '(-?\\d+(?:[.,]\\d+)?)';
+const units = '(milimetros?|centimetros?|metros?|mm|cm|m)';
+const names = { sala: 'Sala', quarto: 'Quarto', divisao: 'Divisão', cozinha: 'Cozinha', escritorio: 'Escritório', wc: 'WC', suite: 'Suite', corredor: 'Corredor', 'casa de banho': 'Casa de banho' };
+const words = { um: 1, uma: 1, dois: 2, duas: 2, tres: 3, quatro: 4, cinco: 5, seis: 6, sete: 7, oito: 8, nove: 9, dez: 10, onze: 11, doze: 12, treze: 13, catorze: 14, quinze: 15, dezasseis: 16, dezessete: 17, dezoito: 18, dezanove: 19, vinte: 20 };
 function unit(value) { return value.startsWith('metro') ? 'm' : value.startsWith('cent') ? 'cm' : value.startsWith('mili') ? 'mm' : value; }
 function dimension(text, label) {
-  const expression = new RegExp(`(?:${label})(?:\\s+(?:interior|de|e|é|das|dos|as|os|a|o))*\\s*${number}\\s*(milimetros?|centimetros?|metros?|mm|cm|m)\\b`);
+  const expression = new RegExp(`(?:${label})(?:\\s+(?:interior|de|e|das|dos|as|os|a|o|com))*\\s*${number}\\s*${units}\\b`);
   const result = text.match(expression); return result ? mm(result[1], unit(result[2])) : undefined;
 }
 export class LocalAssistant {
@@ -12,26 +15,46 @@ export class LocalAssistant {
   cancel() { this.pending = null; }
   interpret(text) {
     if (text.length > 2000) throw new Error('O pedido é demasiado longo para esta versão.');
-    try {
-      const exact = parseCommand(text); this.pending = null; return { ...exact, source: 'guided' };
-    } catch { /* Natural-language interpretation follows; all dimensions are still validated. */ }
-    const normalized = normalize(text), prediction = predict(model, text);
-    const pair = normalized.match(new RegExp(`${number}\\s*(?:x|×|por)\\s*${number}\\s*(milimetros?|centimetros?|metros?|mm|cm|m)\\b`));
+    const clean = normalize(text).trim();
+    if (/^(?:mostra|mostrar|ver|enquadrar) (?:tudo|todo o desenho|a planta)$/.test(clean) || /^(?:zoom all|z a)$/.test(clean)) return { type: 'zoom-all', message: 'Vou enquadrar todo o desenho.' };
+    if (/^(ola|bom dia|boa tarde|boa noite|ajuda|o que podes fazer)[!? .]*$/.test(clean)) return { type: 'answer', message: 'Posso preparar divisões retangulares e pedir as medidas em falta. Experimenta “quero uma sala de 4 por 5 metros, com paredes de 20 cm”. Também posso enquadrar tudo. Para desenho preciso à mão, usa o modo Manual e a linha de comandos.' };
+    try { const exact = parseCommand(text); this.pending = null; return { ...exact, source: 'guided' }; }
+    catch { /* Try natural language; dimensional validation remains mandatory. */ }
+    const normalized = clean.replace(/\b(um|uma|dois|duas|tres|quatro|cinco|seis|sete|oito|nove|dez|onze|doze|treze|catorze|quinze|dezasseis|dezessete|dezoito|dezanove|vinte)\b/g, word => words[word]);
+    const prediction = predict(model, text);
+    const target = clean.match(/\b(casa de banho|sala|quarto|divisao|cozinha|escritorio|wc|suite|corredor)\b/);
+    if (/\b(portas?|janelas?|escadas?|telhado|estrutura|betao|licenciamento|regulamento|3d|render)\b/.test(clean)) return { type: 'unsupported', message: 'Esse pedido inclui elementos que ainda não consigo desenhar ou validar. Nesta versão posso preparar divisões retangulares. Usa as ferramentas manuais para linhas e retângulos; portas, janelas, 3D e validação legal ainda não estão implementados.' };
+    const pair = normalized.match(new RegExp(`${number}\\s*(?:x|×|por)\\s*${number}(?:\\s*${units}\\b)?`));
     const dimensions = {};
-    if (pair) { dimensions.width = mm(pair[1], unit(pair[3])); dimensions.height = mm(pair[2], unit(pair[3])); }
+    if (pair?.[3]) { dimensions.width = mm(pair[1], unit(pair[3])); dimensions.height = mm(pair[2], unit(pair[3])); }
     dimensions.width ??= dimension(normalized, 'largura');
     dimensions.height ??= dimension(normalized, 'comprimento|altura');
     dimensions.thickness = dimension(normalized, 'paredes|parede|espessura');
+    const unitReply = normalized.match(new RegExp(`^(?:em )?${units}[.! ]*$`));
+    if (this.pending?.unscaled && unitReply) { dimensions.width = mm(this.pending.unscaled[0], unit(unitReply[1])); dimensions.height = mm(this.pending.unscaled[1], unit(unitReply[1])); }
+    if (this.pending?.width && this.pending?.height && !this.pending.thickness) {
+      const wallReply = normalized.match(new RegExp(`^${number}\\s*${units}[.! ]*$`));
+      if (wallReply) dimensions.thickness = mm(wallReply[1], unit(wallReply[2]));
+    }
     const hasDimensions = Object.values(dimensions).some(value => value !== undefined);
-    if (prediction.intent === 'room' && prediction.confidence >= 0.45 && prediction.coverage >= 0.35 || this.pending && hasDimensions) {
+    const isRoom = !!target || prediction.intent === 'room' && prediction.confidence >= 0.45 && prediction.coverage >= 0.35;
+    if (isRoom || this.pending && (hasDimensions || pair || unitReply)) {
       const pending = { ...this.pending };
+      if (target) pending.name = names[target[1]];
       for (const [key, value] of Object.entries(dimensions)) if (value !== undefined) pending[key] = value;
+      if (pair && !pair[3]) {
+        if (pair[1].startsWith('-') || pair[2].startsWith('-')) throw new Error('As dimensões da divisão têm de ser positivas.');
+        pending.unscaled = [pair[1], pair[2]]; delete pending.width; delete pending.height;
+      }
+      if (pending.width && pending.height) delete pending.unscaled;
       this.pending = pending;
+      if (pending.unscaled) return { type: 'clarification', message: `As dimensões ${pending.unscaled[0]} × ${pending.unscaled[1]} estão em metros, centímetros ou milímetros? Responde, por exemplo, “metros”.`, source: 'local-ml' };
       const missing = [['width', 'largura interior'], ['height', 'comprimento interior'], ['thickness', 'espessura das paredes']].filter(([key]) => !pending[key]).map(([, label]) => label);
-      if (missing.length) return { type: 'clarification', message: `Preciso de: ${missing.join(', ')}. Indica as unidades (m, cm ou mm).`, source: 'local-ml' };
+      if (missing.length) return { type: 'clarification', message: `Preciso de ${missing.join(' e ')}. ${pending.width && pending.height ? 'Para as paredes podes responder só “20 cm”.' : 'Podes indicar “4 por 5 metros, paredes de 20 cm”.'}`, source: 'local-ml' };
+      validateEntity({ id: 'proposal', type: 'room', x: 0, y: 0, name: pending.name ?? 'Divisão', ...pending });
       this.pending = null;
       return { type: 'room', ...pending, source: 'local-ml' };
     }
-    return { type: 'unsupported', message: 'Ainda consigo criar divisões retangulares com medidas explícitas. Exemplo: “desenha uma sala de 4 por 5 metros, com paredes de 20 cm”. Para desfazer, refazer ou cancelar, usa esses comandos. Não executo pedidos que não consiga validar.', source: 'local-ml' };
+    return { type: 'unsupported', message: 'Ainda não consigo executar esse pedido. Experimenta “quero uma sala de 4 por 5 metros com paredes de 20 cm”, ou escreve “ajuda” para ver as capacidades atuais.', source: 'local-ml' };
   }
 }

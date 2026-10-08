@@ -6,7 +6,7 @@ Aplicação Windows de arquitetura, gratuita, com IA local, machine learning e l
 
 - O pedido em linguagem natural transforma-se numa proposta estruturada, validada antes de alterar o projeto.
 - O motor geométrico é a autoridade para medidas e áreas. O modelo de linguagem/classificador não calcula geometria nem atesta cumprimento legal.
-- Unidades e tolerâncias explícitas. No protótipo: inteiros em milímetros; entradas inferiores a 1 mm são recusadas sem arredondamento silencioso; ajuste manual de 10 mm na grelha. Isto é uma limitação declarada, não uma promessa de precisão ilimitada.
+- Unidades e tolerâncias explícitas. No protótipo: inteiros em milímetros; entradas inferiores a 1 mm são recusadas sem arredondamento silencioso; ajuste à grelha de 10 mm opcional (F9); ponteiro livre à precisão de 1 mm. Isto é uma limitação declarada, não uma promessa de precisão ilimitada.
 - Medidas das divisões são interiores; as paredes crescem para o exterior. Área mostrada é área útil geométrica da divisão, sem classificação jurídica.
 - Cada edição é reversível. Próxima evolução: histórico persistente, autor, origem, proposta, revisão, parâmetros e validação.
 - Toda peça desenhada publicada deve identificar revisão do modelo, escala e unidades. Plantas, cortes, alçados, cotas e mapas de áreas devem derivar do mesmo modelo.
@@ -19,6 +19,7 @@ Aplicação Windows de arquitetura, gratuita, com IA local, machine learning e l
 | Componente | Responsabilidade atual | Evolução |
 | --- | --- | --- |
 | `core.js` | Geometria e projeto 2D, validação, undo/redo | Modelo semântico de edifício e comandos transacionais |
+| `cad.js` | Comandos manuais, coordenadas cartesianas, seleção e enquadramento | Restrições e mais operações CAD |
 | `renderer.js` | Vista SVG e ferramentas manuais | Vistas 2D derivadas; vista 3D separada |
 | `assistant.js` | Conversa curta e extração de medidas | Planeamento local, esclarecimentos e propostas por etapas |
 | `learning.js` e `intent-model.js` | Classificador treinável Naive Bayes | Avaliação maior, modelos locais de linguagem, exemplos corrigidos consentidos |
@@ -32,7 +33,7 @@ A vista SVG não deve tornar-se a base de dados do projeto. As operações passa
 O formato v1 é estritamente 2D. Implementar migração explícita para um modelo v2, mantendo os ficheiros antigos:
 
 - Edifício, pisos, níveis/elevacões, espaços, paredes, lajes, coberturas e vãos com identificadores estáveis.
-- Coordenadas cartesianas 3D, sistema de referência, unidades/tolerâncias e transformação documentada para a vista 2D. Hoje Y na vista cresce para baixo e é invertido na troca CAD; não tratar isto como coordenadas 3D finais.
+- Coordenadas cartesianas 3D, sistema de referência, unidades/tolerâncias e transformação documentada para a vista 2D. No formato guardado v1, Y interno cresce para baixo; a interface manual 0.2 e a troca CAD transformam-no para coordenadas cartesianas; não tratar isto como coordenadas 3D finais.
 - Paredes com eixo/contorno, espessura, altura e materiais; portas e janelas pertencem a paredes. Divisões calculadas a partir de limites verificados.
 - Motor geométrico independente, interfaces para operações de sólidos e restrições. Investigar Open CASCADE e a sua licença LGPL antes de integrar; não embutir operações 3D no SVG.
 - Adaptadores de vistas produzem planta, corte e alçado do mesmo modelo. Projeções para apresentação nunca alteram dimensões do modelo.

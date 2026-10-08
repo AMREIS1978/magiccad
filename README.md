@@ -20,7 +20,7 @@ O arranque verifica estes ficheiros antes de instalar. Caso o npm falhe depois d
 ## O que já existe
 
 - Divisões retangulares: dimensões interiores explícitas, espessura de paredes, posição, área e cotas visuais.
-- Linhas manuais, seleção, eliminação, zoom, deslocação, enquadramento e desfazer/refazer.
+- Modo manual com linha de comandos: LINE/L, RECTANG/REC, MOVE/M, ERASE/E, UNDO/U e REDO; linhas contínuas, coordenadas absolutas/relativas, seleção por janela/crossing, ORTHO, OSNAP e zoom.
 - Conversa local curta: reconhece pedidos de divisões e pergunta por medidas em falta. O modelo Naive Bayes é treinado com exemplos em `data/intents.pt.json`; não é um LLM geral.
 - Guardar/abrir projetos `.magiccad.json`, com validação e aviso de alterações por guardar.
 - DWG real: exportação R2000 de linhas e contornos através da API pública LibreDWG; reabertura e comparação automática de coordenadas/camadas antes de gravar o destino.
@@ -28,7 +28,7 @@ O arranque verifica estes ficheiros antes de instalar. Caso o npm falhe depois d
 
 Não exporta nomes, áreas ou cotas visuais para DWG nesta versão. Os contornos importados não recuperam as divisões semânticas; guarda também o projeto MagicCAD. Não há ainda paredes ligadas, portas/janelas, cotas associativas, impressão, LLM geral, autopilot, 3D, renderização ou conformidade RJUE validada.
 
-A geometria atual usa inteiros de 1 mm e limites de ±1000 m; entradas com maior precisão são recusadas. A grelha manual ajusta a 10 mm. As paredes crescem para o exterior das medidas interiores. Estes limites não constituem certificação de rigor profissional.
+A geometria atual usa inteiros de 1 mm e limites de ±1000 m; entradas com maior precisão são recusadas. O ponteiro ajusta à precisão de 1 mm; F9 ativa ajuste à grelha de 10 mm. F3 ativa OSNAP a extremidades e pontos médios representáveis em mm inteiros. As paredes crescem para o exterior das medidas interiores. Estes limites não constituem certificação de rigor profissional.
 
 ## Desenvolvimento
 
@@ -82,6 +82,31 @@ O pacote é criado em `dist/`. A execução e a compilação nativas no Windows 
 - `desfazer`, `refazer`, `cancelar`.
 
 Os comandos preparam uma proposta; revê as medidas e a posição e seleciona **Aplicar à planta**. O botão **Divisão** permite introduzi-las diretamente. Roda do rato: zoom; botão do meio: deslocar; Esc: cancelar; Ctrl+Z: desfazer; Ctrl+S: guardar.
+
+## Operação manual — versão 0.2
+
+O botão **Manual** dá prioridade à área de desenho. O botão **Assistente IA** mostra a conversa. A linha de comandos manual fica por baixo do desenho, com instruções para o passo atual.
+
+| Ação | Comando ou atalho |
+| --- | --- |
+| Ver limites e todo o desenho | **ZOOM ALL**, `Z A` ou `Z` → Enter → `A` → Enter |
+| Enquadrar apenas o desenho | **ZOOM EXTENTS**, `Z E`, ou duplo clique no botão do meio |
+| Linha contínua | `L` → Enter → primeiro ponto → pontos seguintes → Enter termina; `C` fecha; `U` desfaz o último segmento |
+| Retângulo | `REC` → Enter → dois cantos; desfaz-se numa única operação |
+| Mover | `M` → Enter → selecionar e Enter (se necessário) → ponto base → destino |
+| Apagar | `E` → Enter → selecionar objetos → Enter confirma |
+| Desfazer/refazer | `U`, `REDO`, Ctrl+Z / Ctrl+Y |
+| Ortho / object snap / grelha | F8 / F3 / F9 |
+| Cancelar e desmarcar | Esc |
+| Repetir o último comando manual | Enter ou Espaço quando a linha de comandos está vazia |
+
+Pontos manuais são cartesianos, em **milímetros**: `4000,5000` representa X=4 m e Y=5 m; Y positivo cresce para cima. Também se pode escrever `4m,5m`. Coordenadas relativas: `@4000,0`; polares: `@4m<90`. Nesta precisão, coordenadas polares que produzam frações de milímetro são recusadas. Para decimais com vírgula usa ponto e vírgula como separador de eixos: `1,5m;2m`.
+
+Seleciona por clique ou por arrasto: esquerda→direita exige inclusão total; direita→esquerda seleciona objetos cruzados. Shift remove da seleção; Ctrl+A na área de desenho seleciona todos. O botão do meio faz pan e a roda faz zoom ao cursor. A roda não cancela a linha em curso.
+
+A conversa aceita Enter para enviar e Shift+Enter para nova linha. Exemplos: `quero uma sala de quatro por cinco metros com paredes de vinte cm`; ou `quero uma sala de 4x5` → indicar `metros` → indicar `20 cm`. A IA local continua específica: não é um LLM geral, nem executa um projeto completo autónomo. O modo manual segue princípios conhecidos do CAD, mas **não tem ainda todas as ferramentas nem compatibilidade integral de operação com AutoCAD**.
+
+O formato guardado v1 continua a conservar Y interno para baixo, para manter os projetos anteriores. A interface manual, a posição de divisões e a troca DWG apresentam coordenadas cartesianas por transformação; nenhum ficheiro anterior é reinterpretado ou reescrito automaticamente.
 
 ## Evolução
 

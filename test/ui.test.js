@@ -8,7 +8,7 @@ const base = new URL('../src/', import.meta.url);
 test('interface: proposta, validação, desenho, undo/redo, cancelamento e ficheiros', async () => {
   const server = createServer(async (request, response) => {
     const name = request.url === '/' ? 'index.html' : request.url.slice(1);
-    if (!['index.html', 'renderer.js', 'core.js', 'style.css', 'assistant.js', 'learning.js', 'intent-model.js'].includes(name)) { response.writeHead(404); response.end(); return; }
+    if (!['index.html', 'renderer.js', 'core.js', 'style.css', 'assistant.js', 'learning.js', 'intent-model.js', 'cad.js'].includes(name)) { response.writeHead(404); response.end(); return; }
     try { response.setHeader('Content-Type', name.endsWith('.js') ? 'text/javascript' : name.endsWith('.css') ? 'text/css' : 'text/html'); response.end(await readFile(new URL(name, base))); }
     catch { response.writeHead(500); response.end(); }
   });
@@ -23,7 +23,7 @@ test('interface: proposta, validação, desenho, undo/redo, cancelamento e fiche
       window.magiccad = { save: async project => { savedProject = structuredClone(project); return 'teste.magiccad.json'; }, open: async () => ({ name: 'teste.magiccad.json', project: structuredClone(savedProject) }) };
     });
     await page.goto(`http://127.0.0.1:${server.address().port}/`);
-    await page.locator('#example').click();
+    await page.locator('#ai-mode').click(); await page.locator('#example').click();
     assert.equal(await page.locator('#room-dialog').evaluate(e => e.open), true);
     assert.equal(await page.locator('#entities > g').count(), 0);
     await page.locator('#room-width').fill('4.0001'); await page.getByRole('button', { name: 'Aplicar à planta' }).click();
