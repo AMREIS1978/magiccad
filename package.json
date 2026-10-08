@@ -1,8 +1,8 @@
 {
   "name": "magiccad",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
-  "description": "CAD 2D para arquitetura com comandos guiados em portugu\u00eas",
+  "description": "CAD 2D para arquitetura com comandos guiados em português",
   "type": "module",
   "main": "src/main.cjs",
   "scripts": {

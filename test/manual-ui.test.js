@@ -62,6 +62,18 @@ test('operador: conversa por Enter, coordenadas, ORTHO, OSNAP, janela, zoom all 
     assert.notEqual(await page.locator('#canvas').getAttribute('viewBox'),beforePan);
     await page.mouse.click(center.x,center.y,{button:'middle'}); await page.mouse.click(center.x,center.y,{button:'middle'});
     assert.match(await page.locator('#status').textContent(),/ZOOM EXTENTS/);
+    await page.locator('#canvas').focus(); await page.keyboard.press('Control+a');
+    await page.locator('#copy').click(); await command('0,0'); await command('@2000,0');
+    assert.equal(await page.locator('.cad-line').count(),14);
+    assert.equal(await page.locator('.cad-line').nth(7).getAttribute('x1'),'2000');
+    await command('U'); assert.equal(await page.locator('.cad-line').count(),7);
+    await command('L'); await command('10000,0'); await command('14000,0'); await command('');
+    await command('Z E'); await page.keyboard.press('Escape');
+    await click(12000,0);
+    await page.locator('#offset').click(); await command('20cm'); await command('10000,1000');
+    assert.equal(await page.locator('.cad-line').last().getAttribute('y1'),'-200');
+    assert.equal(await page.locator('.cad-line').last().getAttribute('y2'),'-200');
+    await command('U'); assert.equal(await page.locator('.cad-line').count(),8);
     await command('Z E'); assert.deepEqual(errors,[]);
     await page.screenshot({path:'/workspace/magiccad-manual.png'});
   } finally { await browser?.close(); await new Promise(resolve=>server.close(resolve)); }

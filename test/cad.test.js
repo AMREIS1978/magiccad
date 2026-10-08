@@ -63,3 +63,29 @@ test('janela contém e crossing cruza segmentos, sem falsos positivos de boundin
   assert.deepEqual(selectWindow(lines, { x: 600, y: 400 }, { x: 400, y: 600 }), ['diagonal']);
   assert.deepEqual(selectWindow(lines, { x: 400, y: 400 }, { x: 600, y: 600 }), []);
 });
+test('COPY preserva os originais, cria IDs novos e desfaz o conjunto', () => {
+  const history = new History(), session = new CadSession(history);
+  session.handle('rec'); session.handle('0,0'); session.handle('4000,5000');
+  const original = structuredClone(history.project.entities);
+  session.selection = new Set(original.map(e => e.id));
+  session.handle('co'); session.handle('0,0'); session.handle('@6000,0');
+  assert.equal(history.project.entities.length, 8);
+  assert.deepEqual(history.project.entities.slice(0, 4), original);
+  assert.equal(history.project.entities[4].x1, 6000);
+  assert.equal(new Set(history.project.entities.map(e => e.id)).size, 8);
+  session.handle('u'); assert.deepEqual(history.project.entities, original);
+});
+test('OFFSET usa o lado indicado, preserva distância e não arredonda diagonais', () => {
+  const history = new History(), session = new CadSession(history);
+  history.add({ id: 'a', type: 'line', x1: 0, y1: 0, x2: 4000, y2: 0 });
+  session.selection.add('a'); session.handle('o'); session.handle('20cm'); session.handle('0,1000');
+  assert.equal(history.project.entities[1].y1, -200);
+  assert.equal(history.project.entities[1].y2, -200);
+  session.handle('u'); assert.equal(history.project.entities.length, 1);
+  history.add({ id: 'b', type: 'line', x1: 0, y1: 0, x2: 4000, y2: 4000 });
+  session.selection = new Set(['b']); session.handle('o'); session.handle('200');
+  const before = JSON.stringify(history.project);
+  assert.throws(() => session.handle('0,1000'), /precisão/);
+  assert.equal(JSON.stringify(history.project), before);
+  session.handle('esc'); assert.equal(session.mode, null);
+});

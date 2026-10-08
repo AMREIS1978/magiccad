@@ -20,7 +20,7 @@ O arranque verifica estes ficheiros antes de instalar. Caso o npm falhe depois d
 ## O que já existe
 
 - Divisões retangulares: dimensões interiores explícitas, espessura de paredes, posição, área e cotas visuais.
-- Modo manual com linha de comandos: LINE/L, RECTANG/REC, MOVE/M, ERASE/E, UNDO/U e REDO; linhas contínuas, coordenadas absolutas/relativas, seleção por janela/crossing, ORTHO, OSNAP e zoom.
+- Modo manual com linha de comandos: LINE/L, RECTANG/REC, MOVE/M, COPY/CO, OFFSET/O, ERASE/E, UNDO/U e REDO; linhas contínuas, coordenadas absolutas/relativas, seleção por janela/crossing, ORTHO, OSNAP e zoom.
 - Conversa local curta: reconhece pedidos de divisões e pergunta por medidas em falta. O modelo Naive Bayes é treinado com exemplos em `data/intents.pt.json`; não é um LLM geral.
 - Guardar/abrir projetos `.magiccad.json`, com validação e aviso de alterações por guardar.
 - DWG real: exportação R2000 de linhas e contornos através da API pública LibreDWG; reabertura e comparação automática de coordenadas/camadas antes de gravar o destino.
@@ -115,3 +115,10 @@ O formato guardado v1 continua a conservar Y interno para baixo, para manter os 
 ## Verificação inicial
 
 Na máquina Linux de desenvolvimento: testes de geometria/IA/DXF, DWG real, interface e desktop Electron com IPC. O teste desktop automatiza a escolha dos ficheiros, mas executa a gravação/leitura e o conversor reais. Não houve ainda execução no Windows nem comparação com AutoCAD ou outro CAD independente.
+
+### Copiar e criar paralelas
+
+- **CO / COPY / COPIAR**: seleciona os objetos, indica o ponto base e o destino. `@6000,0` copia 6 m para a direita. Os originais são preservados e U desfaz o conjunto.
+- **O / OFFSET**: indica a distância (`200` = 200 mm ou `20cm`), seleciona uma linha e Enter, depois indica um ponto do lado pretendido. Com uma linha já selecionada, passa diretamente ao lado após a distância.
+
+OFFSET suporta linhas e recusa resultados que não possam ser representados exatamente na precisão de 1 mm. Não arredonda coordenadas nem altera o original. Círculos, cotas editáveis e ligação a modelos de conversa locais continuam em desenvolvimento.

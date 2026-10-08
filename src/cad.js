@@ -72,15 +72,28 @@ export function erase(history, selection) {
   if (!selection.size) throw new Error('Seleciona pelo menos um objeto.');
   history.commit({ ...history.project, entities: history.project.entities.filter(e => !selection.has(e.id)) }); selection.clear();
 }
-export function move(history, selection, dx, dy) {
+export function move(history, selection, dx, dy, duplicate = false) {
   if (!selection.size) throw new Error('Seleciona pelo menos um objeto.');
-  const entities = history.project.entities.map(entity => {
+  const translated = history.project.entities.filter(entity => !duplicate || selection.has(entity.id)).map(entity => {
     if (!selection.has(entity.id)) return entity;
-    return entity.type === 'room' ? { ...entity, x: entity.x + dx, y: entity.y + dy } : { ...entity, x1: entity.x1 + dx, y1: entity.y1 + dy, x2: entity.x2 + dx, y2: entity.y2 + dy };
+    const identity = duplicate ? { id: crypto.randomUUID() } : {};
+    return entity.type === 'room' ? { ...entity, ...identity, x: entity.x + dx, y: entity.y + dy } : { ...entity, ...identity, x1: entity.x1 + dx, y1: entity.y1 + dy, x2: entity.x2 + dx, y2: entity.y2 + dy };
   });
-  history.commit({ ...history.project, entities });
+  history.commit({ ...history.project, entities: duplicate ? [...history.project.entities, ...translated] : translated });
 }
-const aliases = { l: 'line', line: 'line', linha: 'line', rec: 'rect', rectang: 'rect', rectangle: 'rect', retangulo: 'rect', m: 'move', move: 'move', mover: 'move', e: 'erase', erase: 'erase', apagar: 'erase', z: 'zoom', zoom: 'zoom', za: 'all', ze: 'extents', u: 'undo', undo: 'undo', desfazer: 'undo', redo: 'redo', refazer: 'redo' };
+export function offsetLine(history, selection, distance, side) {
+  if (selection.size !== 1) throw new Error('OFFSET: seleciona uma única linha.');
+  const line = history.project.entities.find(e => selection.has(e.id));
+  if (!line || line.type !== 'line') throw new Error('OFFSET suporta linhas nesta versão.');
+  if (!Number.isSafeInteger(distance) || distance <= 0) throw new Error('Distância positiva em milímetros.');
+  const vx = line.x2 - line.x1, vy = line.y2 - line.y1, length = Math.hypot(vx, vy);
+  const cross = vx * (side.y - line.y1) - vy * (side.x - line.x1);
+  if (!cross) throw new Error('Indica um ponto fora da linha para escolher o lado.');
+  const sign = Math.sign(cross), dx = -vy / length * distance * sign, dy = vx / length * distance * sign;
+  if (Math.abs(dx - Math.round(dx)) > 1e-6 || Math.abs(dy - Math.round(dy)) > 1e-6) throw new Error('Este offset não cabe na precisão de 1 mm. Não foi arredondado.');
+  history.add({ ...line, id: crypto.randomUUID(), x1: line.x1 + Math.round(dx), y1: line.y1 + Math.round(dy), x2: line.x2 + Math.round(dx), y2: line.y2 + Math.round(dy) });
+}
+const aliases = { co: 'copy', copy: 'copy', copiar: 'copy', o: 'offset', offset: 'offset', l: 'line', line: 'line', linha: 'line', rec: 'rect', rectang: 'rect', rectangle: 'rect', retangulo: 'rect', m: 'move', move: 'move', mover: 'move', e: 'erase', erase: 'erase', apagar: 'erase', z: 'zoom', zoom: 'zoom', za: 'all', ze: 'extents', u: 'undo', undo: 'undo', desfazer: 'undo', redo: 'redo', refazer: 'redo' };
 export class CadSession {
   constructor(history) { this.history = history; this.selection = new Set(); this.mode = null; this.points = []; this.stage = null; this.lastCommand = null; }
   cancel() { this.mode = null; this.points = []; this.stage = null; return { message: 'Comando cancelado.' }; }
@@ -88,9 +101,10 @@ export class CadSession {
     if (this.mode === 'line') return this.points.length ? 'LINE: próximo ponto [C Fechar / U Desfazer / Enter Terminar]' : 'LINE: primeiro ponto';
     if (this.mode === 'rect') return this.points.length ? 'RECTANG: canto oposto' : 'RECTANG: primeiro canto';
     if (this.mode === 'zoom') return 'ZOOM: [A All / E Extents]';
-    if (this.mode === 'move') return this.stage === 'select' ? 'MOVE: selecionar objetos e Enter' : this.stage === 'base' ? 'MOVE: ponto base' : 'MOVE: ponto de destino ou @deslocamento';
+    if (this.mode === 'offset') return this.stage === 'distance' ? 'OFFSET: distância em mm (ou 20cm)' : this.stage === 'select' ? 'OFFSET: selecionar uma linha e Enter' : 'OFFSET: indicar o lado com um ponto';
+    if (['move', 'copy'].includes(this.mode)) return this.stage === 'select' ? `${this.mode.toUpperCase()}: selecionar objetos e Enter` : this.stage === 'base' ? `${this.mode.toUpperCase()}: ponto base` : `${this.mode.toUpperCase()}: destino ou @deslocamento`;
     if (this.mode === 'erase') return 'ERASE: selecionar objetos e Enter';
-    return 'Comando: L · REC · M · E · Z A · Z E · U · REDO';
+    return 'Comando: L · REC · M · CO · O · E · Z A · Z E · U · REDO';
   }
   handle(text) {
     const input = text.trim(), key = input.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
@@ -114,9 +128,10 @@ export class CadSession {
     if (!input) {
       if (this.mode === 'line') { this.cancel(); return { message: 'LINE terminado.' }; }
       if (this.mode === 'erase') { erase(this.history, this.selection); this.cancel(); return { message: 'Objetos apagados. U para desfazer.' }; }
-      if (this.mode === 'move' && this.stage === 'select') {
+      if (['move', 'copy', 'offset'].includes(this.mode) && this.stage === 'select') {
         if (!this.selection.size) throw new Error('Seleciona objetos e carrega em Enter.');
-        this.stage = 'base'; return { message: this.prompt() };
+        if (this.mode === 'offset' && this.selection.size !== 1) throw new Error('Seleciona uma única linha.');
+        this.stage = this.mode === 'offset' ? 'side' : 'base'; return { message: this.prompt() };
       }
       if (!this.mode && this.lastCommand) return this.handle(this.lastCommand);
       return { message: this.prompt() };
@@ -126,17 +141,23 @@ export class CadSession {
       if (command === 'undo' || command === 'redo') { this.cancel(); this.history[command](); this.selection.clear(); return { message: command === 'undo' ? 'Operação desfeita.' : 'Operação refeita.' }; }
       if (command === 'all' || command === 'extents') return this.handle(command === 'all' ? 'z a' : 'z e');
       this.cancel(); this.mode = command; this.lastCommand = input;
-      if (command === 'move') this.stage = this.selection.size ? 'base' : 'select';
+      if (['move', 'copy'].includes(command)) this.stage = this.selection.size ? 'base' : 'select';
+      if (command === 'offset') this.stage = 'distance';
       return { message: this.prompt() };
     }
-    if (this.mode && ['line', 'rect', 'move'].includes(this.mode) && this.stage !== 'select') return this.point(parsePoint(input, this.points.at(-1)));
-    throw new Error('Comando desconhecido. Usa L, REC, M, E, Z A, Z E, U ou REDO.');
+    if (this.mode === 'offset' && this.stage === 'distance') {
+      this.distance = scalar(input); if (this.distance <= 0) throw new Error('A distância deve ser positiva.');
+      this.stage = this.selection.size === 1 ? 'side' : 'select'; return { message: this.prompt() };
+    }
+    if (this.mode && ['line', 'rect', 'move', 'copy', 'offset'].includes(this.mode) && this.stage !== 'select') return this.point(parsePoint(input, this.points.at(-1)));
+    throw new Error('Comando desconhecido. Usa L, REC, M, CO, O, E, Z A, Z E, U ou REDO.');
   }
   point(p) {
-    if (!['line', 'rect', 'move'].includes(this.mode) || this.stage === 'select') throw new Error(this.prompt());
+    if (!['line', 'rect', 'move', 'copy', 'offset'].includes(this.mode) || ['select', 'distance'].includes(this.stage)) throw new Error(this.prompt());
     if (!Number.isSafeInteger(p.x) || !Number.isSafeInteger(p.y) || Math.abs(p.x) > LIMIT || Math.abs(p.y) > LIMIT) throw new Error('Ponto inválido.');
+    if (this.mode === 'offset') { offsetLine(this.history, this.selection, this.distance, p); this.cancel(); return { message: 'Linha paralela criada. U para desfazer.' }; }
     const previous = this.points.at(-1);
-    if (!previous) { this.points.push(p); if (this.mode === 'move') this.stage = 'target'; return { message: this.prompt() }; }
+    if (!previous) { this.points.push(p); if (['move', 'copy'].includes(this.mode)) this.stage = 'target'; return { message: this.prompt() }; }
     const makeLine = (a, b) => ({ id: crypto.randomUUID(), type: 'line', x1: a.x, y1: a.y, x2: b.x, y2: b.y });
     if (this.mode === 'line') { this.history.add(makeLine(previous, p)); this.points.push(p); }
     else if (this.mode === 'rect') {
@@ -144,7 +165,7 @@ export class CadSession {
       const points = [previous, { x: p.x, y: previous.y }, p, { x: previous.x, y: p.y }];
       this.history.commit({ ...this.history.project, entities: [...this.history.project.entities, ...points.map((point, i) => makeLine(point, points[(i + 1) % 4]))] });
       this.cancel(); return { message: 'Retângulo criado. U desfaz o retângulo completo.' };
-    } else { move(this.history, this.selection, p.x - previous.x, p.y - previous.y); this.cancel(); return { message: 'Objetos movidos. U para desfazer.' }; }
+    } else { const copied = this.mode === 'copy'; move(this.history, this.selection, p.x - previous.x, p.y - previous.y, copied); this.cancel(); return { message: copied ? 'Objetos copiados. U para desfazer.' : 'Objetos movidos. U para desfazer.' }; }
     return { message: this.prompt() };
   }
 }

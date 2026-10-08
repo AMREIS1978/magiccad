@@ -29,9 +29,9 @@ function fit(all = false) {
 }
 function updatePrompt() {
   const text = cad.prompt(); $('cad-prompt').textContent = text; $('mode').textContent = cad.mode ? text : `${cad.selection.size} objeto(s) selecionado(s)`;
-  $('cad-input').placeholder = cad.mode === 'zoom' ? 'A = All · E = Extents' : cad.mode === 'erase' || cad.stage === 'select' ? 'Seleciona objetos na planta; Enter confirma' : cad.mode ? 'X,Y em mm: 4000,5000 · @4000,0 · ou clica na planta' : 'L, REC, M, E, Z A… · 4000 mm = 4 m';
-  for (const [id, mode] of [['select', null], ['line', 'line'], ['rectangle', 'rect'], ['move', 'move']]) $(id).classList.toggle('active', cad.mode === mode);
-  $('canvas').classList.toggle('cad-drawing', ['line', 'rect', 'move'].includes(cad.mode));
+  $('cad-input').placeholder = cad.mode === 'zoom' ? 'A = All · E = Extents' : cad.stage === 'distance' ? 'Distância: 200 mm ou 20cm' : cad.mode === 'erase' || cad.stage === 'select' ? 'Seleciona objetos na planta; Enter confirma' : cad.mode ? 'X,Y em mm: 4000,5000 · @4000,0 · ou clica na planta' : 'L, REC, M, CO, O, E, Z A… · 4000 mm = 4 m';
+  for (const [id, mode] of [['select', null], ['line', 'line'], ['rectangle', 'rect'], ['move', 'move'], ['copy', 'copy'], ['offset', 'offset']]) $(id).classList.toggle('active', cad.mode === mode);
+  $('canvas').classList.toggle('cad-drawing', ['line', 'rect', 'move', 'copy', 'offset'].includes(cad.mode));
 }
 function render() {
   $('entities').replaceChildren(); $('preview').replaceChildren(); snapped = null;
@@ -85,7 +85,7 @@ $('undo').onclick = undo; $('redo').onclick = redo;
 $('fit').onclick = () => runCad('z a'); $('extents').onclick = () => runCad('z e');
 $('delete').onclick = () => { try { erase(history, cad.selection); cad.cancel(); render(); cadMessage('Objetos apagados. U para desfazer.'); } catch { runCad('e', true); } };
 $('select').onclick = () => { cad.cancel(); render(); status('Selecionar: clique ou janela. Esquerda→direita contém; direita→esquerda cruza. Shift remove.'); };
-for (const [id, command] of [['line', 'l'], ['rectangle', 'rec'], ['move', 'm']]) $(id).onclick = () => runCad(command, true);
+for (const [id, command] of [['line', 'l'], ['rectangle', 'rec'], ['move', 'm'], ['copy', 'co'], ['offset', 'o']]) $(id).onclick = () => runCad(command, true);
 function setMode(manual) { document.body.classList.toggle('manual-mode', manual); $('manual-mode').setAttribute('aria-pressed', manual); $('ai-mode').setAttribute('aria-pressed', !manual); (manual ? $('cad-input') : $('command')).focus(); }
 $('manual-mode').onclick = () => setMode(true); $('ai-mode').onclick = () => setMode(false);
 function toggle(id) {
@@ -132,7 +132,7 @@ function point(event, constrain = false) {
 function preview(p) {
   $('preview').replaceChildren(); const previous = cad.points.at(-1);
   if (previous && cad.mode === 'rect') $('preview').append(node('rect', { x: Math.min(previous.x, p.x), y: Math.min(previous.y, p.y), width: Math.abs(p.x - previous.x), height: Math.abs(p.y - previous.y), class: 'preview-line', fill: 'none' }));
-  else if (previous && cad.mode === 'move') {
+  else if (previous && ['move', 'copy'].includes(cad.mode)) {
     for (const entity of history.project.entities.filter(e => cad.selection.has(e.id))) for (const [a, b] of segments(entity)) $('preview').append(node('line', { x1: a.x + p.x - previous.x, y1: a.y + p.y - previous.y, x2: b.x + p.x - previous.x, y2: b.y + p.y - previous.y, class: 'preview-line' }));
   } else if (previous && cad.mode === 'line') $('preview').append(node('line', { x1: previous.x, y1: previous.y, x2: p.x, y2: p.y, class: 'preview-line' }));
   if (snapped) { const size = 5 / $('canvas').getScreenCTM().a; $('preview').append(node('rect', { x: snapped.x - size, y: snapped.y - size, width: size * 2, height: size * 2, class: 'snap-marker' })); }
@@ -146,7 +146,7 @@ $('canvas').onpointerdown = event => {
   }
   if (event.button !== 0) return;
   $('canvas').focus();
-  if (['line', 'rect', 'move'].includes(cad.mode) && cad.stage !== 'select') {
+  if (['line', 'rect', 'move', 'copy', 'offset'].includes(cad.mode) && !['select', 'distance'].includes(cad.stage)) {
     try { const result = cad.point(point(event, true)); render(); cadMessage(result.message); } catch (error) { cadMessage(error.message); }
     return;
   }
@@ -158,7 +158,7 @@ $('canvas').onpointermove = event => {
   if (drag) {
     const matrix = $('canvas').getScreenCTM(); view.x = drag.view.x - (event.clientX - drag.clientX) / matrix.a; view.y = drag.view.y - (event.clientY - drag.clientY) / matrix.d; applyView();
   }
-  const p = point(event, !!cad.mode && cad.stage !== 'select'); $('coordinates').textContent = `X ${metres(p.x)} · Y ${metres(-p.y)} m`;
+  const p = point(event, !!cad.mode && !['select', 'distance'].includes(cad.stage)); $('coordinates').textContent = `X ${metres(p.x)} · Y ${metres(-p.y)} m`;
   if (selectionDrag) {
     const a = selectionDrag.start; $('preview').replaceChildren(node('rect', { x: Math.min(a.x, p.x), y: Math.min(a.y, p.y), width: Math.abs(p.x - a.x), height: Math.abs(p.y - a.y), class: `selection-box${p.x < a.x ? ' crossing' : ''}` }));
   } else preview(p);
