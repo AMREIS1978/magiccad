@@ -75,6 +75,30 @@ test('operador: conversa por Enter, coordenadas, ORTHO, OSNAP, janela, zoom all 
     assert.equal(await page.locator('.cad-line').last().getAttribute('y2'),'-200');
     await command('U'); assert.equal(await page.locator('.cad-line').count(),8);
     await command('Z E'); assert.deepEqual(errors,[]);
+    // TRIM in the renderer: choose the clicked portion, preserve undo and selected boundaries.
+    await page.locator('#canvas').focus(); await page.keyboard.press('Control+a'); await command('E'); await command('');
+    for(const points of [['0,0','6000,0'],['2000,-1000','2000,1000'],['4000,-1000','4000,1000']]) {await command('L');for(const p of points) await command(p);await command('');}
+    await command('Z E');await page.keyboard.press('Escape');await page.locator('#trim').click();await command('');await click(3000,0);
+    assert.equal(await page.locator('.cad-line').count(),4);
+    assert.equal(await page.locator('.cad-line').first().getAttribute('x2'),'2000');
+    await command('U');assert.equal(await page.locator('.cad-line').count(),3);await command('');
+    await click(2000,-500);await command('TR');await command('');await click(3000,0);
+    assert.equal(await page.locator('.cad-line').first().getAttribute('x2'),'2000');await command('U');await command('');
+    await command('Z A');await page.locator('#drawing-unit').selectOption('m');await command('L');await command('0,2');
+    await page.keyboard.press('F8');const direction=await screen(1000,-2000);await page.mouse.move(direction.x,direction.y);await command('4');
+    assert.equal(await page.locator('.cad-line').last().getAttribute('x2'),'4000');assert.equal(await page.locator('.cad-line').last().getAttribute('y2'),'-2000');
+    await command('');await page.keyboard.press('F8');await page.locator('#drawing-unit').selectOption('mm');
+    // Cooperative door conversation uses the current room and clickable short replies.
+    await page.locator('#room-tool').click();await page.locator('#room-name').fill('Sala');await page.locator('#room-form button[type=submit]').click();
+    await page.locator('#ai-mode').click();
+    await page.locator('#messages .suggestions button').filter({hasText:'Inserir uma porta'}).last().click();
+    for(const reply of ['90 cm','Parede superior','A 1 metro do canto','Dobradiça no fim']) await page.locator('#messages .suggestions button').filter({hasText:reply}).last().click();
+    assert.equal(await page.locator('#door-dialog').evaluate(e=>e.open),true);
+    assert.equal(await page.locator('#door-width').inputValue(),'0.9');assert.equal(await page.locator('#door-offset').inputValue(),'1');assert.equal(await page.locator('#door-wall').inputValue(),'north');
+    await page.locator('#door-form button[type=submit]').click();assert.equal(await page.locator('.door-leaf').count(),1);
+    const path=await page.locator('.wall').getAttribute('d');assert.equal((path.match(/M/g)||[]).length,3);
+    await command('U');assert.equal(await page.locator('.door-leaf').count(),0);await command('REDO');assert.equal(await page.locator('.door-leaf').count(),1);
+    assert.deepEqual(errors,[]);
     await page.screenshot({path:'/workspace/magiccad-manual.png'});
   } finally { await browser?.close(); await new Promise(resolve=>server.close(resolve)); }
 });

@@ -58,3 +58,22 @@ test('revisão de dimensões sem unidades pede esclarecimento e nunca reutiliza 
   const result = ai.interpret('20 cm'); assert.equal(result.width,6000); assert.equal(result.height,7000);
   assert.throws(() => ai.interpret('quero uma sala de -4x5 metros com paredes de 20 cm'));
 });
+
+test('assistente coopera para inserir portas e usa a divisão selecionada', () => {
+ const ai=new LocalAssistant(),context={rooms:[{id:'r',type:'room',name:'Sala',x:0,y:0,width:4000,height:5000,thickness:200}],selection:['r']};
+ let response=ai.interpret('insere uma porta',context);assert.match(response.message,/Sala/);assert.ok(response.suggestions.includes('90 cm'));
+ response=ai.interpret('90 cm',context);assert.match(response.message,/parede/);
+ response=ai.interpret('parede superior',context);assert.match(response.message,/distância/);
+ response=ai.interpret('0 m do canto',context);assert.match(response.message,/dobradiça/);
+ response=ai.interpret('dobradiça no fim',context);assert.equal(response.type,'door');assert.equal(response.offset,0);assert.equal(response.width,900);assert.equal(response.hinge,'end');assert.equal(response.roomId,'r');
+ assert.equal(ai.doorPending,null);
+ response=ai.interpret('porta de 80 cm na parede direita a 1 metro do canto com dobradiça no início',context);
+ assert.equal(response.type,'door');assert.equal(response.offset,1000);assert.equal(response.wall,'east');
+ ai.interpret('porta',context);ai.interpret('cancelar',context);assert.equal(ai.doorPending,null);
+ assert.equal(ai.interpret('inserir porta').type,'answer');assert.equal(ai.interpret('aparar linhas').command,'tr');
+});
+test('assistente pede a divisão quando há várias e não inventa uma escolha', () => {
+ const ai=new LocalAssistant(),context={rooms:[{id:'r',type:'room',name:'Sala',x:0,y:0,width:4000,height:5000,thickness:200},{id:'s',type:'room',name:'Quarto',x:0,y:0,width:3000,height:4000,thickness:150}]};
+ assert.match(ai.interpret('porta',context).message,/divisão/);
+ assert.match(ai.interpret('Sala',context).message,/largura/);
+});

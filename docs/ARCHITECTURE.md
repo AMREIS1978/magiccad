@@ -30,10 +30,10 @@ A vista SVG não deve tornar-se a base de dados do projeto. As operações passa
 
 ## Evolução 3D e renderização
 
-O formato v1 é estritamente 2D. Implementar migração explícita para um modelo v2, mantendo os ficheiros antigos:
+Os formatos v1 e v2 são estritamente 2D; v2 acrescenta portas associadas a divisões e lê v1 sem mudar as coordenadas. Implementar migração explícita para um futuro modelo 3D, mantendo os ficheiros antigos:
 
 - Edifício, pisos, níveis/elevacões, espaços, paredes, lajes, coberturas e vãos com identificadores estáveis.
-- Coordenadas cartesianas 3D, sistema de referência, unidades/tolerâncias e transformação documentada para a vista 2D. No formato guardado v1, Y interno cresce para baixo; a interface manual 0.2 e a troca CAD transformam-no para coordenadas cartesianas; não tratar isto como coordenadas 3D finais.
+- Coordenadas cartesianas 3D, sistema de referência, unidades/tolerâncias e transformação documentada para a vista 2D. Nos formatos guardados v1/v2, Y interno cresce para baixo; a interface manual 0.3 e a troca CAD transformam-no para coordenadas cartesianas; não tratar isto como coordenadas 3D finais.
 - Paredes com eixo/contorno, espessura, altura e materiais; portas e janelas pertencem a paredes. Divisões calculadas a partir de limites verificados.
 - Motor geométrico independente, interfaces para operações de sólidos e restrições. Investigar Open CASCADE e a sua licença LGPL antes de integrar; não embutir operações 3D no SVG.
 - Adaptadores de vistas produzem planta, corte e alçado do mesmo modelo. Projeções para apresentação nunca alteram dimensões do modelo.
@@ -70,3 +70,9 @@ Antes de codificar requisitos legais, consultar no Diário da República a vers�
 5. Materiais, apresentação e renderização local; evoluir a conversa/autopilot com validação de lotes ao longo destas fases.
 
 Tudo deve usar componentes sem pagamento obrigatório. Distribuir MagicCAD sob GPL-3.0-or-later, incluir licenças e código-fonte exigidos pelos componentes. Gratuito não significa ausência de obrigações de licença nem de requisitos de hardware.
+
+## Incremento 0.3
+
+TRIM usa interseções de segmentos por aritmética inteira BigInt e valida os pontos de corte antes de aplicar. A unidade de introdução de comandos é escolhida na interface; o armazenamento permanece em milímetros. Distância direta em LINE usa a direção apontada pelo cursor. COPY aceita vários destinos.
+
+As portas são dados semânticos relativos a uma divisão: parede, offset ao canto, largura e dobradiça. Geometria única partilhada por seleção/snaps, desenho e exportação. O assistente recebe apenas divisões e IDs selecionados, mantém o pedido em curso, pede um campo em falta de cada vez, oferece respostas clicáveis e propõe confirmação. Continua a usar regras e um classificador local de intenções; não foi integrado um LLM nesta entrega.

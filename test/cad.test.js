@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { History } from '../src/core.js';
-import { CadSession, parsePoint, zoomView, selectWindow, move } from '../src/cad.js';
+import { CadSession, parsePoint, zoomView, selectWindow, move, trimLine } from '../src/cad.js';
 test('coordenadas CAD: mm, metros, relativas e eixo Y positivo para cima', () => {
   assert.deepEqual(parsePoint('4000,5000'), { x: 4000, y: -5000 });
   assert.deepEqual(parsePoint('4m,5m'), { x: 4000, y: -5000 });
@@ -73,6 +73,9 @@ test('COPY preserva os originais, cria IDs novos e desfaz o conjunto', () => {
   assert.deepEqual(history.project.entities.slice(0, 4), original);
   assert.equal(history.project.entities[4].x1, 6000);
   assert.equal(new Set(history.project.entities.map(e => e.id)).size, 8);
+  session.handle('@8000,0');assert.equal(history.project.entities.length,12);assert.equal(history.project.entities[8].x1,8000);
+  session.handle('');assert.equal(session.mode,null);
+  session.handle('u');assert.equal(history.project.entities.length,8);
   session.handle('u'); assert.deepEqual(history.project.entities, original);
 });
 test('OFFSET usa o lado indicado, preserva distância e não arredonda diagonais', () => {
@@ -88,4 +91,35 @@ test('OFFSET usa o lado indicado, preserva distância e não arredonda diagonais
   assert.throws(() => session.handle('0,1000'), /precisão/);
   assert.equal(JSON.stringify(history.project), before);
   session.handle('esc'); assert.equal(session.mode, null);
+});
+
+test('TRIM remove o intervalo clicado e preserva ambos os lados numa operação', () => {
+ const h=new History();
+ for(const e of [{id:'a',x1:0,y1:0,x2:6000,y2:0},{id:'b',x1:2000,y1:-1000,x2:2000,y2:1000},{id:'c',x1:4000,y1:-1000,x2:4000,y2:1000}]) h.add({type:'line',...e});
+ const original=structuredClone(h.project);trimLine(h,'a',new Set(['b','c']),{x:3000,y:0});
+ const pieces=h.project.entities.filter(e=>e.y1===0&&e.y2===0);
+ assert.deepEqual(pieces.map(e=>[e.x1,e.x2]),[[0,2000],[4000,6000]]);
+ h.undo();assert.deepEqual(h.project,original);
+ const session=new CadSession(h);session.handle('tr');session.handle('');assert.equal(session.stage,'cut');assert.equal(session.cutters.size,3);
+ trimLine(h,'a',session.cutters,{x:100,y:0});assert.equal(h.project.entities.find(e=>e.id==='a').x1,2000);
+ session.handle('u');assert.deepEqual(h.project,original);session.handle('');assert.equal(session.mode,null);
+});
+test('TRIM recusa interseções fracionárias sem modificar o projeto', () => {
+ const h=new History();h.add({id:'a',type:'line',x1:0,y1:0,x2:10,y2:0});h.add({id:'b',type:'line',x1:0,y1:-1,x2:3,y2:1});
+ const before=JSON.stringify(h.project),n=h.past.length;
+ assert.throws(()=>trimLine(h,'a',new Set(['b']),{x:0,y:0}),/precisão/);
+ assert.equal(JSON.stringify(h.project),before);assert.equal(h.past.length,n);
+ assert.throws(()=>trimLine(h,'a',new Set(),{x:0,y:0}),/interseção/);
+});
+test('entrada CAD em metros e distância direta preserva milímetros exatos', () => {
+ const h=new History(),s=new CadSession(h);s.unit='m';s.handle('l');s.handle('0,0');s.direction={x:100,y:0};s.handle('4');s.handle('@0,5');
+ assert.deepEqual(h.project.entities.map(e=>[e.x1,e.y1,e.x2,e.y2]),[[0,0,4000,0],[4000,0,4000,-5000]]);
+ s.direction={x:1,y:1};assert.throws(()=>s.handle('1'),/precisão/);
+});
+
+test('mover e copiar divisões conserva as portas e permite desfazer o conjunto', () => {
+ const h=new History();h.add({id:'r',type:'room',name:'Sala',x:0,y:0,width:4000,height:5000,thickness:200,doors:[{wall:'east',width:900,offset:1000,hinge:'end'}]});
+ const original=structuredClone(h.project),selection=new Set(['r']);
+ move(h,selection,6000,-1000,true);assert.equal(h.project.entities.length,2);assert.equal(h.project.entities[1].x,6000);assert.deepEqual(h.project.entities[1].doors,original.entities[0].doors);h.undo();assert.deepEqual(h.project,original);
+ move(h,selection,1000,2000);assert.equal(h.project.entities[0].y,2000);assert.deepEqual(h.project.entities[0].doors,original.entities[0].doors);h.undo();assert.deepEqual(h.project,original);
 });

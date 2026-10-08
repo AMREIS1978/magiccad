@@ -1,4 +1,4 @@
-import { validateProject, roomGeometry, emptyProject, LIMIT } from './core.js';
+import { validateProject, roomSegments, emptyProject, LIMIT } from './core.js';
 import { DxfWriter, point3d, Units } from '@tarikjabiri/dxf';
 export function projectToDxf(project) {
   const data = validateProject(project);
@@ -12,11 +12,7 @@ export function projectToDxf(project) {
   for (const entity of data.entities) {
     if (entity.type === 'line') line(entity.x1, entity.y1, entity.x2, entity.y2, entity.layer ?? 'DESENHO');
     else {
-      const geometry = roomGeometry(entity);
-      for (const r of [geometry.interior, geometry.exterior]) {
-        line(r.x, r.y, r.x + r.width, r.y, 'PAREDES'); line(r.x + r.width, r.y, r.x + r.width, r.y + r.height, 'PAREDES');
-        line(r.x + r.width, r.y + r.height, r.x, r.y + r.height, 'PAREDES'); line(r.x, r.y + r.height, r.x, r.y, 'PAREDES');
-      }
+      for (const [a,b] of roomSegments(entity)) line(a.x,a.y,b.x,b.y,'PAREDES');
     }
   }
   return drawing.stringify();

@@ -26,7 +26,18 @@ export function validateEntity(entity) {
     const thickness = integer(entity.thickness, 1, 1000);
     if (typeof entity.name !== 'string' || !entity.name.trim() || entity.name.length > 80) throw new Error('Nome de divisão inválido.');
     integer(x - thickness); integer(y - thickness); integer(x + width + thickness); integer(y + height + thickness);
-    return { id: entity.id, type: 'room', name: entity.name, x, y, width, height, thickness };
+    const doors = entity.doors ?? [];
+    if (!Array.isArray(doors) || doors.length > 100) throw new Error('Lista de portas inválida.');
+    const checked = doors.map(d => {
+      if (!d || !['north','south','east','west'].includes(d.wall)) throw new Error('Parede da porta inválida.');
+      const offset = integer(d.offset, 0), size = integer(d.width, 1), length = ['north','south'].includes(d.wall) ? width : height;
+      if (offset + size > length) throw new Error('A porta ultrapassa o comprimento da parede.');
+      if (!['start','end'].includes(d.hinge)) throw new Error('Dobradiça inválida.');
+      if (size > (['north','south'].includes(d.wall) ? height : width)) throw new Error('A folha da porta não cabe no interior da divisão.');
+      return { wall: d.wall, offset, width: size, hinge: d.hinge };
+    });
+    checked.forEach((d, i) => { if (checked.slice(0,i).some(other => other.wall === d.wall && d.offset < other.offset + other.width && other.offset < d.offset + d.width)) throw new Error('As portas sobrepõem-se.'); });
+    return { id: entity.id, type: 'room', name: entity.name, x, y, width, height, thickness, ...(checked.length ? { doors: checked } : {}) };
   }
   if (entity.type === 'line') {
     const x1 = integer(entity.x1), y1 = integer(entity.y1), x2 = integer(entity.x2), y2 = integer(entity.y2);
@@ -37,9 +48,9 @@ export function validateEntity(entity) {
   }
   throw new Error('Tipo de objeto não suportado.');
 }
-export function emptyProject() { return { format: 'magiccad', version: 1, units: 'mm', entities: [] }; }
+export function emptyProject() { return { format: 'magiccad', version: 2, units: 'mm', entities: [] }; }
 export function validateProject(data) {
-  if (!data || data.format !== 'magiccad' || data.version !== 1 || data.units !== 'mm' || !Array.isArray(data.entities) || data.entities.length > 10000) throw new Error('Formato de projeto inválido ou versão não suportada.');
+  if (!data || data.format !== 'magiccad' || ![1, 2].includes(data.version) || data.units !== 'mm' || !Array.isArray(data.entities) || data.entities.length > 10000) throw new Error('Formato de projeto inválido ou versão não suportada.');
   const entities = data.entities.map(validateEntity);
   if (new Set(entities.map(e => e.id)).size !== entities.length) throw new Error('O projeto contém identificadores repetidos.');
   return { ...emptyProject(), entities };
@@ -74,4 +85,38 @@ export function parseCommand(text) {
   const match = input.match(/^(?:cria|criar) (?:uma )?(?:divisao|sala|quarto) (?:de )?(\d+(?:[.,]\d+)?)\s*(?:x|×)\s*(\d+(?:[.,]\d+)?)\s*(m|metros?) (?:com )?paredes (?:de )?(\d+(?:[.,]\d+)?)\s*(mm|cm|m)\.?$/);
   if (!match) throw new Error('Experimente: cria uma divisão de 4 x 5 metros com paredes de 20 cm. Também aceito desfazer, refazer e cancelar.');
   return { type: 'room', width: mm(match[1]), height: mm(match[2]), thickness: mm(match[4], match[5]) };
+}
+
+// Doors belong to their room: translation, copy, undo and project persistence stay atomic.
+export function doorGeometry(room, door) {
+  const { x, y, width: w, height: h, thickness: t } = room;
+  const horizontal = ['north','south'].includes(door.wall), north = door.wall === 'north', west = door.wall === 'west';
+  const start = horizontal ? { x: x + door.offset, y: north ? y : y+h } : { x: west ? x : x+w, y: y+door.offset };
+  const end = { x: start.x + (horizontal ? door.width : 0), y: start.y + (horizontal ? 0 : door.width) };
+  const delta = horizontal ? { x: 0, y: north ? -t : t } : { x: west ? -t : t, y: 0 };
+  const outerStart = { x: start.x+delta.x, y: start.y+delta.y }, outerEnd = { x: end.x+delta.x, y: end.y+delta.y };
+  const hinge = door.hinge === 'start' ? start : end;
+  const tip = { x: hinge.x + (horizontal ? 0 : west ? door.width : -door.width), y: hinge.y + (horizontal ? north ? door.width : -door.width : 0) };
+  return { start, end, outerStart, outerEnd, hinge, tip };
+}
+export function roomSegments(room, includeLeaf = true) {
+  const { interior, exterior } = roomGeometry(room), doors = room.doors ?? [];
+  const output = [];
+  for (const r of [interior, exterior]) {
+    for (const wall of ['north','east','south','west']) {
+      const horizontal = ['north','south'].includes(wall), fixed = horizontal ? (wall === 'north' ? r.y : r.y+r.height) : (wall === 'west' ? r.x : r.x+r.width);
+      const low = horizontal ? r.x : r.y, high = low + (horizontal ? r.width : r.height);
+      const gaps = doors.filter(d => d.wall === wall).map(d => { const g=doorGeometry(room,d); return [horizontal ? g.start.x : g.start.y, horizontal ? g.end.x : g.end.y]; }).sort((a,b)=>a[0]-b[0]);
+      let cursor=low;
+      const add=(a,b)=>{ if(a<b) output.push(horizontal ? [{x:a,y:fixed},{x:b,y:fixed}] : [{x:fixed,y:a},{x:fixed,y:b}]); };
+      for (const [a,b] of gaps) { add(cursor,a); cursor=b; } add(cursor,high);
+    }
+  }
+  for (const d of doors) { const g=doorGeometry(room,d); output.push([g.start,g.outerStart],[g.end,g.outerEnd]); if(includeLeaf) output.push([g.hinge,g.tip]); }
+  return output;
+}
+export function insertDoor(history, roomId, door) {
+  const room=history.project.entities.find(e=>e.id===roomId && e.type==='room');
+  if (!room) throw new Error('Seleciona uma divisão criada no MagicCAD.');
+  history.commit({ ...history.project, entities: history.project.entities.map(e=> e.id===roomId ? {...room, doors:[...(room.doors??[]),door]} : e) });
 }

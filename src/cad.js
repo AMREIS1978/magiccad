@@ -1,25 +1,25 @@
-import { mm, LIMIT, roomGeometry } from './core.js';
+import { mm, LIMIT, roomSegments } from './core.js';
 export function scalar(text, defaultUnit = 'mm') {
   const match = text.trim().match(/^(-?)(\d+(?:[.,]\d+)?)(mm|cm|m)?$/i);
   if (!match) throw new Error('Medida inválida. Usa milímetros ou um sufixo: 4000, 400cm, 4m.');
   if (/^0(?:[.,]0+)?$/.test(match[2])) return 0;
   return (match[1] ? -1 : 1) * mm(match[2], (match[3] ?? defaultUnit).toLowerCase());
 }
-export function parsePoint(text, base = null) {
+export function parsePoint(text, base = null, defaultUnit = 'mm') {
   let input = text.trim(), relative = input.startsWith('@');
   if (relative) { if (!base) throw new Error('Define primeiro um ponto de referência.'); input = input.slice(1); }
   let x, y;
   if (input.includes('<')) {
     if (!relative) throw new Error('Coordenada polar: usa @distância<ângulo.');
     const parts = input.split('<'); if (parts.length !== 2 || !/^-?\d+(?:\.\d+)?$/.test(parts[1])) throw new Error('Ângulo inválido.');
-    const distance = scalar(parts[0]), angle = Number(parts[1]) * Math.PI / 180;
+    const distance = scalar(parts[0], defaultUnit), angle = Number(parts[1]) * Math.PI / 180;
     x = distance * Math.cos(angle); y = distance * Math.sin(angle);
     if (Math.abs(x - Math.round(x)) > 0.000001 || Math.abs(y - Math.round(y)) > 0.000001) throw new Error('A coordenada polar não cabe na precisão de 1 mm. Usa coordenadas cartesianas ou um ângulo de 0/90/180/270 graus.');
     x = Math.round(x); y = Math.round(y);
   } else {
     const parts = input.split(input.includes(';') ? ';' : ',');
     if (parts.length !== 2) throw new Error('Ponto: X,Y em mm; relativo: @X,Y. Exemplo: 0,0 ou @4000,0.');
-    x = scalar(parts[0]); y = scalar(parts[1]);
+    x = scalar(parts[0], defaultUnit); y = scalar(parts[1], defaultUnit);
   }
   const point = { x: x + (relative ? base.x : 0), y: -y + (relative ? base.y : 0) };
   if (!Number.isSafeInteger(point.x) || !Number.isSafeInteger(point.y) || Math.abs(point.x) > LIMIT || Math.abs(point.y) > LIMIT) throw new Error('Ponto fora dos limites de ±1000 m.');
@@ -27,11 +27,7 @@ export function parsePoint(text, base = null) {
 }
 export function segments(entity) {
   if (entity.type === 'line') return [[{ x: entity.x1, y: entity.y1 }, { x: entity.x2, y: entity.y2 }]];
-  const geometry = roomGeometry(entity);
-  return [geometry.interior, geometry.exterior].flatMap(r => {
-    const p = [{ x: r.x, y: r.y }, { x: r.x + r.width, y: r.y }, { x: r.x + r.width, y: r.y + r.height }, { x: r.x, y: r.y + r.height }];
-    return p.map((point, i) => [point, p[(i + 1) % 4]]);
-  });
+  return roomSegments(entity);
 }
 export function bounds(entities, labels = false) {
   if (!entities.length) return null;
@@ -93,18 +89,46 @@ export function offsetLine(history, selection, distance, side) {
   if (Math.abs(dx - Math.round(dx)) > 1e-6 || Math.abs(dy - Math.round(dy)) > 1e-6) throw new Error('Este offset não cabe na precisão de 1 mm. Não foi arredondado.');
   history.add({ ...line, id: crypto.randomUUID(), x1: line.x1 + Math.round(dx), y1: line.y1 + Math.round(dy), x2: line.x2 + Math.round(dx), y2: line.y2 + Math.round(dy) });
 }
-const aliases = { co: 'copy', copy: 'copy', copiar: 'copy', o: 'offset', offset: 'offset', l: 'line', line: 'line', linha: 'line', rec: 'rect', rectang: 'rect', rectangle: 'rect', retangulo: 'rect', m: 'move', move: 'move', mover: 'move', e: 'erase', erase: 'erase', apagar: 'erase', z: 'zoom', zoom: 'zoom', za: 'all', ze: 'extents', u: 'undo', undo: 'undo', desfazer: 'undo', redo: 'redo', refazer: 'redo' };
+export function trimLine(history, targetId, cutters, point) {
+  const target = history.project.entities.find(e=>e.id===targetId);
+  if (!target || target.type !== 'line') throw new Error('TRIM corta linhas nesta versão; as paredes de divisões mantêm-se paramétricas.');
+  const ax=BigInt(target.x1), ay=BigInt(target.y1), rx=BigInt(target.x2-target.x1), ry=BigInt(target.y2-target.y1);
+  const cross=(x,y,u,v)=>x*v-y*u;
+  const cuts=[];
+  for (const entity of history.project.entities.filter(e=>e.id!==targetId && cutters.has(e.id))) for(const [a,b] of segments(entity)) {
+    const sx=BigInt(b.x-a.x), sy=BigInt(b.y-a.y), qx=BigInt(a.x)-ax, qy=BigInt(a.y)-ay;
+    let den=cross(rx,ry,sx,sy), tn=cross(qx,qy,sx,sy), un=cross(qx,qy,rx,ry);
+    if (!den) continue;
+    if(den<0n) {den=-den;tn=-tn;un=-un;}
+    if(tn<=0n || tn>=den || un<0n || un>den) continue;
+    cuts.push({tn,t:Number(tn)/Number(den),xn:ax*den+rx*tn,yn:ay*den+ry*tn,den});
+  }
+  cuts.sort((a,b)=>a.tn*b.den < b.tn*a.den ? -1 : a.tn*b.den > b.tn*a.den ? 1 : 0);
+  const unique=cuts.filter((c,i)=> !i || c.xn*cuts[i-1].den!==cuts[i-1].xn*c.den || c.yn*cuts[i-1].den!==cuts[i-1].yn*c.den);
+  if (!unique.length) throw new Error('Não existe interseção com os limites selecionados.');
+  const dx=target.x2-target.x1,dy=target.y2-target.y1;
+  const position=((point.x-target.x1)*dx+(point.y-target.y1)*dy)/(dx*dx+dy*dy);
+  if(unique.some(c=>Math.abs(c.t-position)<1e-9)) throw new Error('Clica no trecho a remover, afastado da interseção.');
+  const lower=[...unique].reverse().find(c=>c.t<position),upper=unique.find(c=>c.t>position);
+  const exact=c=>{if(c.xn%c.den || c.yn%c.den) throw new Error('A interseção não cabe na precisão de 1 mm. O desenho não foi alterado.'); return {x:Number(c.xn/c.den),y:Number(c.yn/c.den)};};
+  const kept=[];
+  if(lower) { const p=exact(lower); kept.push({...target,x2:p.x,y2:p.y}); }
+  if(upper) { const p=exact(upper); kept.push({...target,id:kept.length?crypto.randomUUID():target.id,x1:p.x,y1:p.y}); }
+  history.commit({...history.project,entities:history.project.entities.flatMap(e=>e.id===targetId?kept:[e])});
+}
+const aliases = { tr: 'trim', trim: 'trim', aparar: 'trim', co: 'copy', copy: 'copy', copiar: 'copy', o: 'offset', offset: 'offset', l: 'line', line: 'line', linha: 'line', rec: 'rect', rectang: 'rect', rectangle: 'rect', retangulo: 'rect', m: 'move', move: 'move', mover: 'move', e: 'erase', erase: 'erase', apagar: 'erase', z: 'zoom', zoom: 'zoom', za: 'all', ze: 'extents', u: 'undo', undo: 'undo', desfazer: 'undo', redo: 'redo', refazer: 'redo' };
 export class CadSession {
-  constructor(history) { this.history = history; this.selection = new Set(); this.mode = null; this.points = []; this.stage = null; this.lastCommand = null; }
-  cancel() { this.mode = null; this.points = []; this.stage = null; return { message: 'Comando cancelado.' }; }
+  constructor(history) { this.history = history; this.selection = new Set(); this.mode = null; this.points = []; this.stage = null; this.lastCommand = null; this.unit = 'mm'; this.direction = null; this.cutters = new Set(); }
+  cancel() { this.mode = null; this.points = []; this.stage = null; this.direction = null; return { message: 'Comando cancelado.' }; }
   prompt() {
+    if (this.mode === 'trim') return this.stage === 'select' ? 'TRIM: selecionar limites e Enter [Enter sem seleção: todos]' : 'TRIM: clicar no trecho a remover [U Desfazer / Enter Terminar]';
     if (this.mode === 'line') return this.points.length ? 'LINE: próximo ponto [C Fechar / U Desfazer / Enter Terminar]' : 'LINE: primeiro ponto';
     if (this.mode === 'rect') return this.points.length ? 'RECTANG: canto oposto' : 'RECTANG: primeiro canto';
     if (this.mode === 'zoom') return 'ZOOM: [A All / E Extents]';
     if (this.mode === 'offset') return this.stage === 'distance' ? 'OFFSET: distância em mm (ou 20cm)' : this.stage === 'select' ? 'OFFSET: selecionar uma linha e Enter' : 'OFFSET: indicar o lado com um ponto';
     if (['move', 'copy'].includes(this.mode)) return this.stage === 'select' ? `${this.mode.toUpperCase()}: selecionar objetos e Enter` : this.stage === 'base' ? `${this.mode.toUpperCase()}: ponto base` : `${this.mode.toUpperCase()}: destino ou @deslocamento`;
     if (this.mode === 'erase') return 'ERASE: selecionar objetos e Enter';
-    return 'Comando: L · REC · M · CO · O · E · Z A · Z E · U · REDO';
+    return 'Comando: L · REC · M · CO · O · TR · E · Z A · Z E · U · REDO';
   }
   handle(text) {
     const input = text.trim(), key = input.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
@@ -125,7 +149,13 @@ export class CadSession {
       if (this.points.at(-1).x !== this.points[0].x || this.points.at(-1).y !== this.points[0].y) this.point(this.points[0]);
       this.cancel(); return { message: 'LINE: contorno fechado.' };
     }
+    if (this.mode === 'trim' && key === 'u') { this.history.undo(); return {message:this.prompt()}; }
     if (!input) {
+      if(this.mode === 'trim') {
+        if(this.stage === 'select') { this.trimAll=!this.selection.size; this.cutters=new Set(this.selection.size?this.selection:this.history.project.entities.map(e=>e.id)); this.selection.clear(); this.stage='cut'; return {message:this.prompt()}; }
+        this.cancel(); return {message:'TRIM terminado.'};
+      }
+      if (this.mode === 'copy' && this.stage === 'target') { this.cancel(); return {message:'COPY terminado.'}; }
       if (this.mode === 'line') { this.cancel(); return { message: 'LINE terminado.' }; }
       if (this.mode === 'erase') { erase(this.history, this.selection); this.cancel(); return { message: 'Objetos apagados. U para desfazer.' }; }
       if (['move', 'copy', 'offset'].includes(this.mode) && this.stage === 'select') {
@@ -142,15 +172,24 @@ export class CadSession {
       if (command === 'all' || command === 'extents') return this.handle(command === 'all' ? 'z a' : 'z e');
       this.cancel(); this.mode = command; this.lastCommand = input;
       if (['move', 'copy'].includes(command)) this.stage = this.selection.size ? 'base' : 'select';
+      if (command === 'trim') this.stage = 'select';
       if (command === 'offset') this.stage = 'distance';
       return { message: this.prompt() };
     }
     if (this.mode === 'offset' && this.stage === 'distance') {
-      this.distance = scalar(input); if (this.distance <= 0) throw new Error('A distância deve ser positiva.');
+      this.distance = scalar(input, this.unit); if (this.distance <= 0) throw new Error('A distância deve ser positiva.');
       this.stage = this.selection.size === 1 ? 'side' : 'select'; return { message: this.prompt() };
     }
-    if (this.mode && ['line', 'rect', 'move', 'copy', 'offset'].includes(this.mode) && this.stage !== 'select') return this.point(parsePoint(input, this.points.at(-1)));
-    throw new Error('Comando desconhecido. Usa L, REC, M, CO, O, E, Z A, Z E, U ou REDO.');
+    if (this.mode === 'line' && this.points.length && /^(?:\d+(?:\.\d+)?(?:mm|cm|m)?|\d+,\d+(?:mm|cm|m))$/i.test(input)) {
+      if(!this.direction) throw new Error('Aponta o cursor na direção pretendida e escreve a distância.');
+      const distance=scalar(input,this.unit), length=Math.hypot(this.direction.x,this.direction.y);
+      if(!length || distance<=0) throw new Error('Indica uma direção e uma distância positiva.');
+      const dx=this.direction.x/length*distance,dy=this.direction.y/length*distance;
+      if(Math.abs(dx-Math.round(dx))>1e-6 || Math.abs(dy-Math.round(dy))>1e-6) throw new Error('Esta direção não cabe na precisão de 1 mm. Usa ORTHO ou coordenadas exatas.');
+      const base=this.points.at(-1); return this.point({x:base.x+Math.round(dx),y:base.y+Math.round(dy)});
+    }
+    if (this.mode && ['line', 'rect', 'move', 'copy', 'offset'].includes(this.mode) && this.stage !== 'select') return this.point(parsePoint(input, this.points.at(-1), this.unit));
+    throw new Error('Comando desconhecido. Usa L, REC, M, CO, O, TR, E, Z A, Z E, U ou REDO.');
   }
   point(p) {
     if (!['line', 'rect', 'move', 'copy', 'offset'].includes(this.mode) || ['select', 'distance'].includes(this.stage)) throw new Error(this.prompt());
@@ -165,7 +204,7 @@ export class CadSession {
       const points = [previous, { x: p.x, y: previous.y }, p, { x: previous.x, y: p.y }];
       this.history.commit({ ...this.history.project, entities: [...this.history.project.entities, ...points.map((point, i) => makeLine(point, points[(i + 1) % 4]))] });
       this.cancel(); return { message: 'Retângulo criado. U desfaz o retângulo completo.' };
-    } else { const copied = this.mode === 'copy'; move(this.history, this.selection, p.x - previous.x, p.y - previous.y, copied); this.cancel(); return { message: copied ? 'Objetos copiados. U para desfazer.' : 'Objetos movidos. U para desfazer.' }; }
+    } else { const copied = this.mode === 'copy'; move(this.history, this.selection, p.x - previous.x, p.y - previous.y, copied); if (!copied) this.cancel(); return { message: copied ? 'Objetos copiados. U para desfazer.' : 'Objetos movidos. U para desfazer.' }; }
     return { message: this.prompt() };
   }
 }

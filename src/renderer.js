@@ -1,6 +1,6 @@
-import { History, mm, metres, roomGeometry, validateProject } from './core.js';
+import { History, mm, metres, roomGeometry, roomSegments, doorGeometry, insertDoor, validateProject } from './core.js';
 import { LocalAssistant } from './assistant.js';
-import { CadSession, scalar, zoomView, segments, selectWindow, erase } from './cad.js';
+import { CadSession, scalar, zoomView, segments, selectWindow, erase, trimLine } from './cad.js';
 const assistant = new LocalAssistant(), $ = id => document.getElementById(id);
 let history = new History(), cad = new CadSession(history);
 let saved = JSON.stringify(history.project), view = zoomView([], 1.4), drag = null, selectionDrag = null;
@@ -13,8 +13,10 @@ function node(tag, attributes = {}, text) {
   return element;
 }
 function status(text) { $('status').textContent = text; }
-function message(text, user = false) {
-  const element = document.createElement('div'); element.className = `message${user ? ' user' : ''}`; element.textContent = text; $('messages').append(element);
+function message(text, user = false, suggestions = []) {
+  const element = document.createElement('div'); element.className = `message${user ? ' user' : ''}`; element.textContent = text;
+  if(suggestions.length) { const choices=document.createElement('div'); choices.className='suggestions'; for(const text of suggestions) { const button=document.createElement('button'); button.type='button'; button.textContent=text; button.onclick=()=>{for(const b of choices.querySelectorAll('button')) b.disabled=true;execute(text);}; choices.append(button); } element.append(choices); }
+  $('messages').append(element);
   while ($('messages').children.length > 50) $('messages').firstElementChild.remove();
   $('messages').scrollTop = $('messages').scrollHeight;
 }
@@ -29,8 +31,8 @@ function fit(all = false) {
 }
 function updatePrompt() {
   const text = cad.prompt(); $('cad-prompt').textContent = text; $('mode').textContent = cad.mode ? text : `${cad.selection.size} objeto(s) selecionado(s)`;
-  $('cad-input').placeholder = cad.mode === 'zoom' ? 'A = All · E = Extents' : cad.stage === 'distance' ? 'Distância: 200 mm ou 20cm' : cad.mode === 'erase' || cad.stage === 'select' ? 'Seleciona objetos na planta; Enter confirma' : cad.mode ? 'X,Y em mm: 4000,5000 · @4000,0 · ou clica na planta' : 'L, REC, M, CO, O, E, Z A… · 4000 mm = 4 m';
-  for (const [id, mode] of [['select', null], ['line', 'line'], ['rectangle', 'rect'], ['move', 'move'], ['copy', 'copy'], ['offset', 'offset']]) $(id).classList.toggle('active', cad.mode === mode);
+  $('cad-input').placeholder = cad.mode === 'zoom' ? 'A = All · E = Extents' : cad.stage === 'distance' ? 'Distância: 200 mm ou 20cm' : cad.mode === 'erase' || cad.stage === 'select' ? 'Seleciona objetos na planta; Enter confirma' : cad.mode ? 'X,Y em mm: 4000,5000 · @4000,0 · ou clica na planta' : 'L, REC, M, CO, O, TR, E, Z A… · 4000 mm = 4 m';
+  for (const [id, mode] of [['select', null], ['line', 'line'], ['rectangle', 'rect'], ['move', 'move'], ['copy', 'copy'], ['offset', 'offset'], ['trim', 'trim']]) $(id).classList.toggle('active', cad.mode === mode);
   $('canvas').classList.toggle('cad-drawing', ['line', 'rect', 'move', 'copy', 'offset'].includes(cad.mode));
 }
 function render() {
@@ -39,7 +41,9 @@ function render() {
     const group = node('g', { 'data-id': entity.id, class: cad.selection.has(entity.id) ? 'selected' : '' });
     if (entity.type === 'room') {
       const { interior: i, exterior: o, area } = roomGeometry(entity), rectangle = r => `M${r.x},${r.y}h${r.width}v${r.height}h${-r.width}z`;
-      group.append(node('path', { d: rectangle(o) + rectangle(i), 'fill-rule': 'evenodd', class: 'wall' }));
+      group.append(node('path', { d: rectangle(o) + rectangle(i) + (entity.doors ?? []).map(d => { const g=doorGeometry(entity,d); return rectangle({x:Math.min(g.start.x,g.outerEnd.x),y:Math.min(g.start.y,g.outerEnd.y),width:Math.abs(g.outerEnd.x-g.start.x),height:Math.abs(g.outerEnd.y-g.start.y)}); }).join(''), 'fill-rule': 'evenodd', class: 'wall' }));
+      for (const [a,b] of roomSegments(entity,false)) group.append(node('line',{x1:a.x,y1:a.y,x2:b.x,y2:b.y,class:'wall-outline'}));
+      for (const d of entity.doors ?? []) { const g=doorGeometry(entity,d); group.append(node('line',{x1:g.hinge.x,y1:g.hinge.y,x2:g.tip.x,y2:g.tip.y,class:'door-leaf'})); }
       group.append(node('text', { x: i.x + i.width / 2, y: i.y + i.height / 2 - 100, class: 'room-label' }, entity.name));
       group.append(node('text', { x: i.x + i.width / 2, y: i.y + i.height / 2 + 170, class: 'room-area' }, `${area.toLocaleString('pt-PT', { maximumFractionDigits: 6 })} m²`));
       group.append(node('text', { x: i.x + i.width / 2, y: o.y - 180, class: 'dimension', 'text-anchor': 'middle' }, `${metres(i.width)} m`));
@@ -52,6 +56,8 @@ function render() {
   snapPoints = [...new Map([...geometry.flat(), ...middlePoints].map(p => [`${p.x},${p.y}`, p])).values()];
   $('undo').disabled = !history.past.length; $('redo').disabled = !history.future.length; $('delete').disabled = false;
   document.title = `${JSON.stringify(history.project) === saved ? '' : '• '}MagicCAD`;
+  const rooms=history.project.entities.filter(e=>e.type==='room'), chosen=rooms.find(r=>cad.selection.has(r.id));
+  $('assistant-context').textContent=chosen ? `${chosen.name} · ${metres(chosen.width*chosen.height/1000)} m² · ${(chosen.doors??[]).length} porta(s)` : rooms.length ? `${rooms.length} divisão(ões) · ${rooms.reduce((a,r)=>a+r.width*r.height/1e6,0).toLocaleString('pt-PT')} m² interiores` : 'Projeto vazio · vamos criar a primeira divisão';
   updatePrompt();
 }
 function runCad(text, focus = false) {
@@ -62,7 +68,7 @@ function runCad(text, focus = false) {
   } catch (error) { cadMessage(error.message); updatePrompt(); }
   if (focus) $('cad-input').focus();
 }
-function cancel() { assistant.cancel(); $('room-dialog').close(); cad.cancel(); cad.selection.clear(); selectionDrag = null; render(); status('Operação cancelada.'); }
+function cancel() { assistant.cancel(); $('room-dialog').close(); $('door-dialog').close(); cad.cancel(); cad.selection.clear(); selectionDrag = null; render(); status('Operação cancelada.'); }
 function undo() { runCad('undo'); }
 function redo() { runCad('redo'); }
 function propose(command) {
@@ -76,16 +82,38 @@ $('room-form').addEventListener('submit', event => {
     const room = { id: crypto.randomUUID(), type: 'room', name: $('room-name').value.trim(), width: mm($('room-width').value), height: mm($('room-height').value), thickness: mm($('room-thickness').value, 'cm'), x: scalar($('room-x').value, 'm'), y: -scalar($('room-y').value, 'm') };
     history.add(room); cad.selection.clear(); cad.selection.add(room.id); $('room-dialog').close(); render(); fit();
     const result = `${room.name}: ${metres(room.width)} × ${metres(room.height)} m interiores; paredes ${room.thickness / 10} cm. Operação aplicada; podes desfazer.`;
-    status(result); message(result);
+    status(result); message(`${result} Queres colocar uma porta nesta divisão ou continuar a desenhar?`,false,['Inserir uma porta','Mostra tudo','Copiar divisão']);
   } catch (error) { $('room-error').textContent = error.message; }
 });
+function proposeDoor(command = {}) {
+  const rooms=history.project.entities.filter(e=>e.type==='room');
+  if (!rooms.length) throw new Error('Cria primeiro uma divisão. As portas desta versão são inseridas nas paredes das divisões MagicCAD.');
+  const select=$('door-room'); select.replaceChildren();
+  for(const room of rooms) { const option=document.createElement('option'); option.value=room.id; option.textContent=room.name; select.append(option); }
+  const chosen=rooms.find(r=>r.id===command.roomId) ?? rooms.find(r=>command.roomName && r.name.toLocaleLowerCase('pt-PT')===command.roomName.toLocaleLowerCase('pt-PT')) ?? rooms.find(r=>cad.selection.has(r.id));
+  if (chosen) select.value=chosen.id;
+  $('door-width').value=command.width === undefined ? '' : String(command.width/1000);
+  $('door-offset').value=command.offset === undefined ? '' : String(command.offset/1000);
+  $('door-wall').value=command.wall ?? ''; $('door-hinge').value=command.hinge ?? '';
+  $('door-error').textContent=''; cad.cancel(); render(); $('door-dialog').showModal();
+}
+$('door-tool').onclick=()=>{try{proposeDoor();}catch(error){cadMessage(error.message);}};
+$('cancel-door').onclick=cancel;
+$('door-form').onsubmit=event=>{
+  event.preventDefault();
+  try {
+    insertDoor(history,$('door-room').value,{wall:$('door-wall').value,width:mm($('door-width').value),offset:scalar($('door-offset').value,'m'),hinge:$('door-hinge').value});
+    $('door-dialog').close(); render(); fit(); message('Porta inserida. Queres continuar nesta divisão?',false,['Inserir outra porta','Mostra tudo','Desfazer']); status('Porta inserida. U para desfazer.');
+  } catch(error){$('door-error').textContent=error.message;}
+};
+$('drawing-unit').onchange=()=>{cad.unit=$('drawing-unit').value;cadMessage(`Introdução de medidas em ${cad.unit}. Sufixos mm/cm/m continuam disponíveis.`);};
 $('cancel-room').onclick = cancel;
 $('room-tool').onclick = () => propose({ width: 4000, height: 5000, thickness: 200 });
 $('undo').onclick = undo; $('redo').onclick = redo;
 $('fit').onclick = () => runCad('z a'); $('extents').onclick = () => runCad('z e');
 $('delete').onclick = () => { try { erase(history, cad.selection); cad.cancel(); render(); cadMessage('Objetos apagados. U para desfazer.'); } catch { runCad('e', true); } };
 $('select').onclick = () => { cad.cancel(); render(); status('Selecionar: clique ou janela. Esquerda→direita contém; direita→esquerda cruza. Shift remove.'); };
-for (const [id, command] of [['line', 'l'], ['rectangle', 'rec'], ['move', 'm'], ['copy', 'co'], ['offset', 'o']]) $(id).onclick = () => runCad(command, true);
+for (const [id, command] of [['line', 'l'], ['rectangle', 'rec'], ['move', 'm'], ['copy', 'co'], ['offset', 'o'], ['trim', 'tr']]) $(id).onclick = () => runCad(command, true);
 function setMode(manual) { document.body.classList.toggle('manual-mode', manual); $('manual-mode').setAttribute('aria-pressed', manual); $('ai-mode').setAttribute('aria-pressed', !manual); (manual ? $('cad-input') : $('command')).focus(); }
 $('manual-mode').onclick = () => setMode(true); $('ai-mode').onclick = () => setMode(false);
 function toggle(id) {
@@ -96,11 +124,13 @@ for (const id of ['ortho', 'osnap', 'snap']) $(id).onclick = () => toggle(id);
 function execute(text) {
   message(text, true);
   try {
-    const command = assistant.interpret(text);
+    const command = assistant.interpret(text,{rooms:history.project.entities.filter(e=>e.type==='room'),selection:[...cad.selection]});
     if (command.type === 'room') { propose(command); message('Proposta preparada. Confirma as medidas e a posição antes de aplicar.'); }
+    else if (command.type === 'door') { proposeDoor(command); message('A porta está preparada. Revê os dados e confirma para abrir o vão na parede.'); }
+    else if (command.type === 'cad') { setMode(true); runCad(command.command,true); message(command.message); }
     else if (command.type === 'undo') undo(); else if (command.type === 'redo') redo(); else if (command.type === 'cancel') cancel();
     else if (command.type === 'zoom-all') { runCad('z a'); message(command.message); }
-    else { message(command.message); status(command.message); }
+    else { message(command.message,false,command.suggestions ?? []); status(command.message); }
   } catch (error) { status(error.message); message(error.message); }
 }
 $('command-form').onsubmit = event => { event.preventDefault(); const text = $('command').value.trim(); if (text) { execute(text); $('command').value = ''; } };
@@ -131,6 +161,7 @@ function point(event, constrain = false) {
 }
 function preview(p) {
   $('preview').replaceChildren(); const previous = cad.points.at(-1);
+  if(previous && cad.mode==='line') cad.direction={x:p.x-previous.x,y:p.y-previous.y};
   if (previous && cad.mode === 'rect') $('preview').append(node('rect', { x: Math.min(previous.x, p.x), y: Math.min(previous.y, p.y), width: Math.abs(p.x - previous.x), height: Math.abs(p.y - previous.y), class: 'preview-line', fill: 'none' }));
   else if (previous && ['move', 'copy'].includes(cad.mode)) {
     for (const entity of history.project.entities.filter(e => cad.selection.has(e.id))) for (const [a, b] of segments(entity)) $('preview').append(node('line', { x1: a.x + p.x - previous.x, y1: a.y + p.y - previous.y, x2: b.x + p.x - previous.x, y2: b.y + p.y - previous.y, class: 'preview-line' }));
@@ -146,6 +177,10 @@ $('canvas').onpointerdown = event => {
   }
   if (event.button !== 0) return;
   $('canvas').focus();
+  if (cad.mode === 'trim' && cad.stage === 'cut') {
+    try { const id=event.target.closest('[data-id]')?.getAttribute('data-id'); trimLine(history,id,cad.trimAll ? new Set(history.project.entities.map(e=>e.id)) : cad.cutters,point(event)); render(); cadMessage('Trecho aparado. U desfaz; clica noutro trecho ou Enter termina.'); } catch(error){cadMessage(error.message);}
+    return;
+  }
   if (['line', 'rect', 'move', 'copy', 'offset'].includes(cad.mode) && !['select', 'distance'].includes(cad.stage)) {
     try { const result = cad.point(point(event, true)); render(); cadMessage(result.message); } catch (error) { cadMessage(error.message); }
     return;
@@ -183,8 +218,8 @@ $('canvas').addEventListener('wheel', event => {
 }, { passive: false });
 document.addEventListener('keydown', event => {
   if (event.key === 'Escape') { event.preventDefault(); cancel(); return; }
-  if (!$('room-dialog').open && ['F3', 'F8', 'F9'].includes(event.key)) { event.preventDefault(); toggle({ F3: 'osnap', F8: 'ortho', F9: 'snap' }[event.key]); return; }
-  if ($('room-dialog').open) return;
+  if (!$('room-dialog').open && !$('door-dialog').open && ['F3', 'F8', 'F9'].includes(event.key)) { event.preventDefault(); toggle({ F3: 'osnap', F8: 'ortho', F9: 'snap' }[event.key]); return; }
+  if ($('room-dialog').open || $('door-dialog').open) return;
   if (event.ctrlKey && event.key.toLowerCase() === 's') { event.preventDefault(); $('save').click(); return; }
   if (event.target === $('cad-input') && event.ctrlKey && ['z','y'].includes(event.key.toLowerCase())) { event.preventDefault(); event.key.toLowerCase() === 'y' || event.shiftKey ? redo() : undo(); return; }
   if (event.target.matches('input,textarea')) return;
@@ -209,7 +244,7 @@ $('open').onclick = async () => {
   if (JSON.stringify(history.project) !== saved && !window.confirm('Há alterações por guardar. Queres abrir outro projeto e descartá-las?')) return;
   try {
     const result = await window.magiccad.open();
-    if (result) { history = new History(validateProject(result.project)); saved = JSON.stringify(history.project); cad = new CadSession(history); assistant.cancel(); $('filename').textContent = result.name; render(); fit(); status('Projeto aberto e validado.'); }
+    if (result) { history = new History(validateProject(result.project)); saved = JSON.stringify(history.project); cad = new CadSession(history); cad.unit=$('drawing-unit').value; assistant.cancel(); $('filename').textContent = result.name; render(); fit(); status('Projeto aberto e validado.'); }
   } catch (error) { status(`Não foi possível abrir: ${error.message}`); }
 };
 window.addEventListener('beforeunload', event => {
@@ -235,7 +270,7 @@ $('import-dwg').onclick = async () => {
   try {
     const result = await window.magiccad.importDwg();
     if (result) {
-      history = new History(result.project); saved = ''; cad = new CadSession(history); assistant.cancel();
+      history = new History(result.project); saved = ''; cad = new CadSession(history); cad.unit=$('drawing-unit').value; assistant.cancel();
       $('filename').textContent = result.name; render(); fit();
       status(`DWG importado: ${history.project.entities.length} linhas. Guarda em MagicCAD para continuar o projeto.`);
     }

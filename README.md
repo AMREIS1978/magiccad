@@ -26,7 +26,7 @@ O arranque verifica estes ficheiros antes de instalar. Caso o npm falhe depois d
 - DWG real: exportação R2000 de linhas e contornos através da API pública LibreDWG; reabertura e comparação automática de coordenadas/camadas antes de gravar o destino.
 - Importação de DWG com LINE/LWPOLYLINE retilíneas 2D e unidades declaradas em mm/cm/m. Outros objetos são recusados para impedir perda silenciosa.
 
-Não exporta nomes, áreas ou cotas visuais para DWG nesta versão. Os contornos importados não recuperam as divisões semânticas; guarda também o projeto MagicCAD. Não há ainda paredes ligadas, portas/janelas, cotas associativas, impressão, LLM geral, autopilot, 3D, renderização ou conformidade RJUE validada.
+Não exporta nomes, áreas ou cotas visuais para DWG nesta versão. Os contornos importados não recuperam as divisões semânticas; guarda também o projeto MagicCAD. Não há ainda paredes ligadas, janelas, cotas associativas, impressão, LLM geral, autopilot, 3D, renderização ou conformidade RJUE validada.
 
 A geometria atual usa inteiros de 1 mm e limites de ±1000 m; entradas com maior precisão são recusadas. O ponteiro ajusta à precisão de 1 mm; F9 ativa ajuste à grelha de 10 mm. F3 ativa OSNAP a extremidades e pontos médios representáveis em mm inteiros. As paredes crescem para o exterior das medidas interiores. Estes limites não constituem certificação de rigor profissional.
 
@@ -83,7 +83,7 @@ O pacote é criado em `dist/`. A execução e a compilação nativas no Windows 
 
 Os comandos preparam uma proposta; revê as medidas e a posição e seleciona **Aplicar à planta**. O botão **Divisão** permite introduzi-las diretamente. Roda do rato: zoom; botão do meio: deslocar; Esc: cancelar; Ctrl+Z: desfazer; Ctrl+S: guardar.
 
-## Operação manual — versão 0.2
+## Operação manual — versão 0.3
 
 O botão **Manual** dá prioridade à área de desenho. O botão **Assistente IA** mostra a conversa. A linha de comandos manual fica por baixo do desenho, com instruções para o passo atual.
 
@@ -94,19 +94,21 @@ O botão **Manual** dá prioridade à área de desenho. O botão **Assistente IA
 | Linha contínua | `L` → Enter → primeiro ponto → pontos seguintes → Enter termina; `C` fecha; `U` desfaz o último segmento |
 | Retângulo | `REC` → Enter → dois cantos; desfaz-se numa única operação |
 | Mover | `M` → Enter → selecionar e Enter (se necessário) → ponto base → destino |
+| Aparar linhas | `TR` → Enter → selecionar limites → Enter → clicar no trecho a remover; Enter sem limites usa todos; U desfaz; Enter termina |
+| Porta numa divisão | Botão **Inserir porta**, ou pede ao assistente; confirma divisão, parede, largura, posição e dobradiça |
 | Apagar | `E` → Enter → selecionar objetos → Enter confirma |
 | Desfazer/refazer | `U`, `REDO`, Ctrl+Z / Ctrl+Y |
 | Ortho / object snap / grelha | F8 / F3 / F9 |
 | Cancelar e desmarcar | Esc |
 | Repetir o último comando manual | Enter ou Espaço quando a linha de comandos está vazia |
 
-Pontos manuais são cartesianos, em **milímetros**: `4000,5000` representa X=4 m e Y=5 m; Y positivo cresce para cima. Também se pode escrever `4m,5m`. Coordenadas relativas: `@4000,0`; polares: `@4m<90`. Nesta precisão, coordenadas polares que produzam frações de milímetro são recusadas. Para decimais com vírgula usa ponto e vírgula como separador de eixos: `1,5m;2m`.
+Pontos manuais são cartesianos, na unidade escolhida em **Medidas** (mm por defeito): `4000,5000` representa X=4 m e Y=5 m; Y positivo cresce para cima. Com Medidas=m, `4,5` representa X=4 m e Y=5 m. Os sufixos continuam disponíveis: `4m,5m`. Em LINE, aponta o cursor na direção pretendida e escreve a distância; F8 restringe a direção aos eixos. Coordenadas relativas: `@4000,0`; polares: `@4m<90`. Nesta precisão, coordenadas polares que produzam frações de milímetro são recusadas. Para decimais com vírgula usa ponto e vírgula como separador de eixos: `1,5m;2m`.
 
 Seleciona por clique ou por arrasto: esquerda→direita exige inclusão total; direita→esquerda seleciona objetos cruzados. Shift remove da seleção; Ctrl+A na área de desenho seleciona todos. O botão do meio faz pan e a roda faz zoom ao cursor. A roda não cancela a linha em curso.
 
 A conversa aceita Enter para enviar e Shift+Enter para nova linha. Exemplos: `quero uma sala de quatro por cinco metros com paredes de vinte cm`; ou `quero uma sala de 4x5` → indicar `metros` → indicar `20 cm`. A IA local continua específica: não é um LLM geral, nem executa um projeto completo autónomo. O modo manual segue princípios conhecidos do CAD, mas **não tem ainda todas as ferramentas nem compatibilidade integral de operação com AutoCAD**.
 
-O formato guardado v1 continua a conservar Y interno para baixo, para manter os projetos anteriores. A interface manual, a posição de divisões e a troca DWG apresentam coordenadas cartesianas por transformação; nenhum ficheiro anterior é reinterpretado ou reescrito automaticamente.
+O formato guardado v2 continua a conservar Y interno para baixo, para manter os projetos anteriores. A interface manual, a posição de divisões e a troca DWG apresentam coordenadas cartesianas por transformação; os projetos v1 são migrados em memória para v2, sem alterar as coordenadas nem reescrever o ficheiro original. A versão v2 impede que versões antigas descartem portas ao abrir o projeto.
 
 ## Evolução
 
@@ -118,7 +120,15 @@ Na máquina Linux de desenvolvimento: testes de geometria/IA/DXF, DWG real, inte
 
 ### Copiar e criar paralelas
 
-- **CO / COPY / COPIAR**: seleciona os objetos, indica o ponto base e o destino. `@6000,0` copia 6 m para a direita. Os originais são preservados e U desfaz o conjunto.
+- **CO / COPY / COPIAR**: seleciona os objetos, indica o ponto base e o destino. `@6000,0` copia 6 m para a direita. Os originais são preservados. COPY permite indicar vários destinos a partir do mesmo ponto base; Enter termina e U desfaz.
 - **O / OFFSET**: indica a distância (`200` = 200 mm ou `20cm`), seleciona uma linha e Enter, depois indica um ponto do lado pretendido. Com uma linha já selecionada, passa diretamente ao lado após a distância.
 
 OFFSET suporta linhas e recusa resultados que não possam ser representados exatamente na precisão de 1 mm. Não arredonda coordenadas nem altera o original. Círculos, cotas editáveis e ligação a modelos de conversa locais continuam em desenvolvimento.
+
+### Portas e assistente cooperante — 0.3
+
+Depois de criar uma divisão, o assistente sugere inserir uma porta, copiar ou enquadrar. Usa a divisão selecionada como contexto e mostra respostas clicáveis. `Inserir uma porta` → `90 cm` → `Parede superior` → `A 1 metro do canto` → `Dobradiça no fim` prepara a confirmação. As medidas são sempre explícitas. Uma proposta inválida pede correção e não altera o projeto.
+
+As portas pertencem às divisões MagicCAD; criam um vão real entre os contornos da parede, ombreiras e folha a 90° para o interior. A posição mede-se desde o canto interior esquerdo nas paredes horizontais ou superior nas verticais. Não há ainda arco de abertura, portas em linhas DWG importadas, janelas ou ligação entre paredes adjacentes. São recusados vãos sobrepostos, fora da parede ou folhas que não caibam no interior. Mover/copiar a divisão preserva as portas; desfazer, guardar e reabrir também. No DWG exportam-se os contornos do vão e a folha; a importação restitui linhas, sem reconstruir a semântica da porta.
+
+TRIM atua em segmentos de linha; pode usar contornos de divisões como limites, mas não corta a divisão paramétrica. Suporta interseções dentro dos segmentos, sem prolongamento implícito. Interseções fracionárias em milímetros são recusadas. A operação manual aproxima-se dos fluxos CAD clássicos, mas não é compatibilidade integral com AutoCAD.
