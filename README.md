@@ -11,6 +11,12 @@ Primeira base de uma aplicação desktop de arquitetura para Windows, gratuita e
 
 Não é necessário abrir PowerShell para experimentar a aplicação 2D. O suporte DWG exige a preparação adicional descrita abaixo. O arranque nativo no Windows ainda não foi validado nesta máquina Linux; se houver um erro, a janela mantém a mensagem visível.
 
+### Se a instalação mostrar um erro do npm
+
+O ZIP precisa de ser **extraído por completo** antes de abrir `INICIAR.cmd`. Não executes o ficheiro dentro da janela do ZIP nem copies apenas esse ficheiro: o arranque depende de `package.json`, `package-lock.json` e da pasta `src`, na mesma pasta extraída.
+
+O arranque verifica estes ficheiros antes de instalar. Caso o npm falhe depois da extração, envia `magiccad-instalacao.log`, criado na pasta do programa, para identificar a causa completa. A captura apenas das últimas linhas da ajuda do npm não identifica a causa.
+
 ## O que já existe
 
 - Divisões retangulares: dimensões interiores explícitas, espessura de paredes, posição, área e cotas visuais.
