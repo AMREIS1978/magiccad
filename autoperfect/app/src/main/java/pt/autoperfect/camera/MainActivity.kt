@@ -1,6 +1,7 @@
 package pt.autoperfect.camera
 
 import android.Manifest
+import android.app.AlertDialog
 import android.content.ContentValues
 import android.content.Context
 import android.content.pm.PackageManager
@@ -8,10 +9,13 @@ import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
+import android.net.Uri
 import android.os.Bundle
 import android.provider.MediaStore
+import android.text.InputType
 import android.view.ScaleGestureDetector
 import android.widget.Button
+import android.widget.EditText
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
@@ -42,12 +46,16 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     private lateinit var scoreText: TextView
     private lateinit var statusText: TextView
     private lateinit var zoomText: TextView
+    private lateinit var aiStatusText: TextView
     private lateinit var captureButton: Button
     private lateinit var zoom1Button: Button
     private lateinit var zoom2Button: Button
     private lateinit var zoom4Button: Button
+    private lateinit var aiButton: Button
     private lateinit var cameraExecutor: ExecutorService
     private lateinit var scaleDetector: ScaleGestureDetector
+    private lateinit var secureKeyStore: SecureKeyStore
+    private val openAiClient = OpenAiClient()
 
     private var imageCapture: ImageCapture? = null
     private var currentCamera: Camera? = null
@@ -59,6 +67,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     private var torchEnabled = false
     private var darkFrames = 0
     private var brightFrames = 0
+    private var lastAiDecision: OpenAiClient.AiDecision? = null
 
     private val permissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -75,12 +84,15 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         scoreText = findViewById(R.id.scoreText)
         statusText = findViewById(R.id.statusText)
         zoomText = findViewById(R.id.zoomText)
+        aiStatusText = findViewById(R.id.aiStatusText)
         captureButton = findViewById(R.id.captureButton)
         zoom1Button = findViewById(R.id.zoom1Button)
         zoom2Button = findViewById(R.id.zoom2Button)
         zoom4Button = findViewById(R.id.zoom4Button)
+        aiButton = findViewById(R.id.aiButton)
 
         cameraExecutor = Executors.newSingleThreadExecutor()
+        secureKeyStore = SecureKeyStore(this)
         sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
         gyro = sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE)
 
@@ -88,6 +100,8 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         zoom1Button.setOnClickListener { setZoom(1f) }
         zoom2Button.setOnClickListener { setZoom(2f) }
         zoom4Button.setOnClickListener { setZoom(4f) }
+        aiButton.setOnClickListener { showAiDialog() }
+        updateAiStatus()
 
         scaleDetector = ScaleGestureDetector(this,
             object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
@@ -113,6 +127,61 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         } else {
             permissionLauncher.launch(Manifest.permission.CAMERA)
         }
+    }
+
+    private fun updateAiStatus(text: String? = null) {
+        aiStatusText.text = text ?: if (secureKeyStore.load().isNullOrBlank()) "IA desligada" else "OpenAI ligada ✓"
+    }
+
+    private fun showAiDialog() {
+        val input = EditText(this).apply {
+            hint = if (secureKeyStore.load().isNullOrBlank()) "sk-..." else "Chave guardada — introduza outra para substituir"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+            setSingleLine(true)
+            setPadding(36, 18, 36, 18)
+        }
+
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("IA OpenAI")
+            .setMessage("Cole a sua chave API. Fica cifrada no Android Keystore e não é escrita no APK.")
+            .setView(input)
+            .setPositiveButton("Testar e guardar", null)
+            .setNeutralButton("Apagar chave") { _, _ ->
+                secureKeyStore.clear()
+                lastAiDecision = null
+                updateAiStatus()
+                Toast.makeText(this, "Chave apagada", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("Cancelar", null)
+            .create()
+
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val key = input.text.toString().trim()
+                if (key.isBlank()) {
+                    input.error = "Introduza a chave API"
+                    return@setOnClickListener
+                }
+                updateAiStatus("A testar ligação…")
+                dialog.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled = false
+                cameraExecutor.execute {
+                    val result = openAiClient.testKey(key)
+                    runOnUiThread {
+                        dialog.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled = true
+                        result.onSuccess {
+                            secureKeyStore.save(key)
+                            updateAiStatus("OpenAI ligada ✓")
+                            Toast.makeText(this, "Ligação à OpenAI confirmada", Toast.LENGTH_SHORT).show()
+                            dialog.dismiss()
+                        }.onFailure { error ->
+                            updateAiStatus("Falha na ligação")
+                            input.error = error.message ?: "Chave ou ligação inválida"
+                        }
+                    }
+                }
+            }
+        }
+        dialog.show()
     }
 
     override fun onStart() {
@@ -182,7 +251,8 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             val score = (exposureScore * 0.55 + stability * 100f * 0.45).roundToInt().coerceIn(0, 100)
             lastScore = score
 
-            val scene = when {
+            val aiScene = lastAiDecision?.scene
+            val scene = aiScene ?: when {
                 luma < 35 -> "Escuro · luz inteligente"
                 luma < 58 -> "Noite · captura automática"
                 luma > 190 -> "Luz intensa · proteção de altas luzes"
@@ -193,6 +263,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
             val hint = when {
                 torchEnabled -> "Luz inteligente ativa"
+                lastAiDecision != null -> "IA OpenAI a afinar a próxima captura"
                 score >= 90 -> "Condição excelente"
                 stability < 0.55f -> "A compensar movimento…"
                 luma < 58 -> "A preparar fotografia noturna…"
@@ -244,10 +315,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
     private fun updateSmartTorch(luma: Double) {
         val camera = currentCamera ?: return
-        val hasFlash = camera.cameraInfo.hasFlashUnit()
-        if (!hasFlash) return
-
-        // Evita ligar a luz em zoom elevado: Lua, paisagem ou assunto distante.
+        if (!camera.cameraInfo.hasFlashUnit()) return
         val nearSubjectLikely = currentZoom <= 1.6f
 
         if (luma < 24 && nearSubjectLikely) {
@@ -289,8 +357,13 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         capture.takePicture(options, ContextCompat.getMainExecutor(this),
             object : ImageCapture.OnImageSavedCallback {
                 override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
-                    statusText.text = "Fotografia AUTO PERFECT guardada"
-                    Toast.makeText(this@MainActivity, "Guardada em Pictures/AutoPerfect", Toast.LENGTH_SHORT).show()
+                    val uri = outputFileResults.savedUri
+                    statusText.text = "Fotografia guardada"
+                    if (uri != null && !secureKeyStore.load().isNullOrBlank()) {
+                        analyzeWithAi(uri)
+                    } else {
+                        Toast.makeText(this@MainActivity, "Guardada em Pictures/AutoPerfect", Toast.LENGTH_SHORT).show()
+                    }
                 }
 
                 override fun onError(exception: ImageCaptureException) {
@@ -298,6 +371,39 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                     Toast.makeText(this@MainActivity, exception.message ?: "Erro de câmara", Toast.LENGTH_LONG).show()
                 }
             })
+    }
+
+    private fun analyzeWithAi(uri: Uri) {
+        val key = secureKeyStore.load() ?: return
+        updateAiStatus("IA a analisar fotografia…")
+        statusText.text = "OpenAI a procurar a melhor afinação…"
+        cameraExecutor.execute {
+            val result = openAiClient.analyzePhoto(key, contentResolver, uri)
+            runOnUiThread {
+                result.onSuccess { decision ->
+                    lastAiDecision = decision
+                    applyAiCaptureTuning(decision)
+                    sceneText.text = decision.scene
+                    statusText.text = decision.summary
+                    updateAiStatus("OpenAI ligada ✓ · análise concluída")
+                    Toast.makeText(this, "AUTO PERFECT IA: afinação aplicada", Toast.LENGTH_SHORT).show()
+                }.onFailure { error ->
+                    updateAiStatus("OpenAI ligada ✓ · análise indisponível")
+                    statusText.text = "Foto guardada · IA: ${error.message ?: "erro temporário"}"
+                }
+            }
+        }
+    }
+
+    private fun applyAiCaptureTuning(decision: OpenAiClient.AiDecision) {
+        val camera = currentCamera ?: return
+        val state = camera.cameraInfo.exposureState
+        if (!state.isExposureCompensationSupported) return
+        val step = state.exposureCompensationStep.toFloat()
+        if (step <= 0f) return
+        val index = (decision.exposureComp / step).roundToInt()
+            .coerceIn(state.exposureCompensationRange.lower, state.exposureCompensationRange.upper)
+        camera.cameraControl.setExposureCompensationIndex(index)
     }
 
     override fun onSensorChanged(event: SensorEvent) {
