@@ -26,33 +26,34 @@ class OpenAiClient {
 
     fun testKey(apiKey: String): Result<String> = runCatching {
         val body = JSONObject().apply {
-            put("model", "gpt-6-luna")
+            put("model", "gpt-5-mini")
             put("input", "Reply only with OK")
             put("max_output_tokens", 16)
         }
-        val json = post(apiKey, body)
-        extractText(json).ifBlank { "OK" }
+        extractText(post(apiKey, body)).ifBlank { "OK" }
     }
 
     fun analyzePhoto(apiKey: String, resolver: ContentResolver, uri: Uri): Result<AiDecision> = runCatching {
         val encoded = encodePreview(resolver, uri)
         val prompt = """
-            You are the AUTO PERFECT photographic director for a Redmi Note 14 Pro 5G.
-            Analyze this real photo conservatively. Never invent details. Return ONLY compact JSON with:
-            scene (string), summary (short string), exposure_compensation (-3..3 integer),
+            You are AUTO PERFECT, a professional photographic director for a Redmi Note 14 Pro 5G.
+            Analyze the real photo and choose tasteful corrections that make it look premium, striking and professionally edited, while remaining photographic and believable.
+            Never invent objects, faces, textures or details that were not captured. Protect natural skin, sky gradients, architecture lines, highlights and fine detail.
+            Return ONLY compact JSON with:
+            scene (string), summary (short Portuguese string), exposure_compensation (-3..3 integer),
             highlights (-100..100), shadows (-100..100), warmth (-100..100), saturation (-100..100),
             sharpness (0..100), denoise (0..100).
-            Optimize for a natural, professional photograph while protecting skin, skies and architecture.
+            Prefer clean low-noise detail, controlled highlights, open shadows, rich but realistic colour and strong micro-contrast.
         """.trimIndent()
 
         val content = JSONArray()
             .put(JSONObject().put("type", "input_text").put("text", prompt))
-            .put(JSONObject().put("type", "input_image").put("image_url", "data:image/jpeg;base64,$encoded"))
+            .put(JSONObject().put("type", "input_image").put("detail", "high").put("image_url", "data:image/jpeg;base64,$encoded"))
 
         val body = JSONObject().apply {
-            put("model", "gpt-6-luna")
+            put("model", "gpt-5-mini")
             put("input", JSONArray().put(JSONObject().put("role", "user").put("content", content)))
-            put("max_output_tokens", 240)
+            put("max_output_tokens", 260)
         }
 
         val raw = extractText(post(apiKey, body)).trim()
@@ -60,13 +61,13 @@ class OpenAiClient {
         val obj = JSONObject(cleaned)
         AiDecision(
             scene = obj.optString("scene", "AUTO PERFECT"),
-            summary = obj.optString("summary", "IA aplicada"),
+            summary = obj.optString("summary", "Edição profissional aplicada"),
             exposureComp = obj.optInt("exposure_compensation", 0).coerceIn(-3, 3),
             highlights = obj.optInt("highlights", 0).coerceIn(-100, 100),
             shadows = obj.optInt("shadows", 0).coerceIn(-100, 100),
             warmth = obj.optInt("warmth", 0).coerceIn(-100, 100),
-            saturation = obj.optInt("saturation", 0).coerceIn(-100, 100),
-            sharpness = obj.optInt("sharpness", 35).coerceIn(0, 100),
+            saturation = obj.optInt("saturation", 8).coerceIn(-100, 100),
+            sharpness = obj.optInt("sharpness", 45).coerceIn(0, 100),
             denoise = obj.optInt("denoise", 30).coerceIn(0, 100)
         )
     }
@@ -75,7 +76,7 @@ class OpenAiClient {
         val connection = (URL("https://api.openai.com/v1/responses").openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
             connectTimeout = 15000
-            readTimeout = 30000
+            readTimeout = 45000
             doOutput = true
             setRequestProperty("Authorization", "Bearer $apiKey")
             setRequestProperty("Content-Type", "application/json")
@@ -111,7 +112,7 @@ class OpenAiClient {
             ?: throw IllegalStateException("Não foi possível ler a fotografia")
         val original = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
             ?: throw IllegalStateException("Fotografia inválida")
-        val maxSide = 1280
+        val maxSide = 1536
         val scale = minOf(1f, maxSide.toFloat() / maxOf(original.width, original.height).toFloat())
         val bitmap = if (scale < 1f) Bitmap.createScaledBitmap(
             original,
@@ -120,7 +121,7 @@ class OpenAiClient {
             true
         ) else original
         val out = ByteArrayOutputStream()
-        bitmap.compress(Bitmap.CompressFormat.JPEG, 82, out)
+        bitmap.compress(Bitmap.CompressFormat.JPEG, 86, out)
         if (bitmap !== original) bitmap.recycle()
         original.recycle()
         return Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
