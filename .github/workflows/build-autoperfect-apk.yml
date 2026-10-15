@@ -3,6 +3,8 @@ name: Build AUTO PERFECT APK
 on:
   push:
     branches: [autoperfect-build]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 jobs:
