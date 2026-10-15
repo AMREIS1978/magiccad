@@ -10,11 +10,13 @@ import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.os.Bundle
 import android.provider.MediaStore
+import android.view.ScaleGestureDetector
 import android.widget.Button
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageCapture
@@ -39,14 +41,24 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     private lateinit var sceneText: TextView
     private lateinit var scoreText: TextView
     private lateinit var statusText: TextView
+    private lateinit var zoomText: TextView
     private lateinit var captureButton: Button
+    private lateinit var zoom1Button: Button
+    private lateinit var zoom2Button: Button
+    private lateinit var zoom4Button: Button
     private lateinit var cameraExecutor: ExecutorService
+    private lateinit var scaleDetector: ScaleGestureDetector
 
     private var imageCapture: ImageCapture? = null
+    private var currentCamera: Camera? = null
     private var stability = 0.75f
     private lateinit var sensorManager: SensorManager
     private var gyro: Sensor? = null
     private var lastScore = 0
+    private var currentZoom = 1f
+    private var torchEnabled = false
+    private var darkFrames = 0
+    private var brightFrames = 0
 
     private val permissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -62,13 +74,39 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         sceneText = findViewById(R.id.sceneText)
         scoreText = findViewById(R.id.scoreText)
         statusText = findViewById(R.id.statusText)
+        zoomText = findViewById(R.id.zoomText)
         captureButton = findViewById(R.id.captureButton)
+        zoom1Button = findViewById(R.id.zoom1Button)
+        zoom2Button = findViewById(R.id.zoom2Button)
+        zoom4Button = findViewById(R.id.zoom4Button)
 
         cameraExecutor = Executors.newSingleThreadExecutor()
         sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
         gyro = sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE)
 
         captureButton.setOnClickListener { takePhoto() }
+        zoom1Button.setOnClickListener { setZoom(1f) }
+        zoom2Button.setOnClickListener { setZoom(2f) }
+        zoom4Button.setOnClickListener { setZoom(4f) }
+
+        scaleDetector = ScaleGestureDetector(this,
+            object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
+                override fun onScale(detector: ScaleGestureDetector): Boolean {
+                    val camera = currentCamera ?: return false
+                    val zoomState = camera.cameraInfo.zoomState.value ?: return false
+                    val wanted = (currentZoom * detector.scaleFactor)
+                        .coerceIn(zoomState.minZoomRatio, zoomState.maxZoomRatio)
+                    currentZoom = wanted
+                    camera.cameraControl.setZoomRatio(wanted)
+                    updateZoomText(wanted)
+                    return true
+                }
+            })
+
+        previewView.setOnTouchListener { _, event ->
+            scaleDetector.onTouchEvent(event)
+            true
+        }
 
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
             startCamera()
@@ -84,6 +122,8 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
     override fun onStop() {
         sensorManager.unregisterListener(this)
+        currentCamera?.cameraControl?.enableTorch(false)
+        torchEnabled = false
         super.onStop()
     }
 
@@ -117,6 +157,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         imageCapture = ImageCapture.Builder()
             .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
             .setJpegQuality(100)
+            .setFlashMode(ImageCapture.FLASH_MODE_AUTO)
             .build()
 
         val analysis = ImageAnalysis.Builder()
@@ -142,14 +183,19 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             lastScore = score
 
             val scene = when {
-                luma < 48 -> "Noite · fusão automática"
+                luma < 35 -> "Escuro · luz inteligente"
+                luma < 58 -> "Noite · captura automática"
                 luma > 190 -> "Luz intensa · proteção de altas luzes"
                 else -> "AUTO PERFECT"
             }
+
+            updateSmartTorch(luma)
+
             val hint = when {
+                torchEnabled -> "Luz inteligente ativa"
                 score >= 90 -> "Condição excelente"
                 stability < 0.55f -> "A compensar movimento…"
-                luma < 48 -> "A preparar captura noturna…"
+                luma < 58 -> "A preparar fotografia noturna…"
                 else -> "A otimizar automaticamente…"
             }
 
@@ -163,12 +209,64 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
         provider.unbindAll()
         try {
-            provider.bindToLifecycle(this, selector, preview, imageCapture, analysis)
+            currentCamera = provider.bindToLifecycle(this, selector, preview, imageCapture, analysis)
+            observeZoom()
         } catch (_: Exception) {
             provider.unbindAll()
-            provider.bindToLifecycle(this, selector, preview, imageCapture)
-            sceneText.text = "AUTO PERFECT · processamento avançado"
-            statusText.text = "Extensão Xiaomi ativa"
+            currentCamera = provider.bindToLifecycle(this, selector, preview, imageCapture)
+            observeZoom()
+            sceneText.text = "AUTO PERFECT · processamento Xiaomi"
+            statusText.text = "HDR/Auto avançado ativo"
+        }
+    }
+
+    private fun observeZoom() {
+        currentCamera?.cameraInfo?.zoomState?.observe(this) { state ->
+            currentZoom = state.zoomRatio
+            updateZoomText(state.zoomRatio)
+            zoom2Button.isEnabled = state.maxZoomRatio >= 2f
+            zoom4Button.isEnabled = state.maxZoomRatio >= 4f
+        }
+    }
+
+    private fun setZoom(requested: Float) {
+        val camera = currentCamera ?: return
+        val state = camera.cameraInfo.zoomState.value ?: return
+        val zoom = requested.coerceIn(state.minZoomRatio, state.maxZoomRatio)
+        currentZoom = zoom
+        camera.cameraControl.setZoomRatio(zoom)
+        updateZoomText(zoom)
+    }
+
+    private fun updateZoomText(zoom: Float) {
+        zoomText.text = String.format(Locale.US, "%.1f×", zoom)
+    }
+
+    private fun updateSmartTorch(luma: Double) {
+        val camera = currentCamera ?: return
+        val hasFlash = camera.cameraInfo.hasFlashUnit()
+        if (!hasFlash) return
+
+        // Evita ligar a luz em zoom elevado: Lua, paisagem ou assunto distante.
+        val nearSubjectLikely = currentZoom <= 1.6f
+
+        if (luma < 24 && nearSubjectLikely) {
+            darkFrames++
+            brightFrames = 0
+        } else if (luma > 42 || !nearSubjectLikely) {
+            brightFrames++
+            darkFrames = 0
+        } else {
+            darkFrames = 0
+            brightFrames = 0
+        }
+
+        if (!torchEnabled && darkFrames >= 6) {
+            torchEnabled = true
+            camera.cameraControl.enableTorch(true)
+        } else if (torchEnabled && brightFrames >= 4) {
+            torchEnabled = false
+            camera.cameraControl.enableTorch(false)
         }
     }
 
@@ -214,6 +312,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
 
     override fun onDestroy() {
+        currentCamera?.cameraControl?.enableTorch(false)
         cameraExecutor.shutdown()
         super.onDestroy()
     }
