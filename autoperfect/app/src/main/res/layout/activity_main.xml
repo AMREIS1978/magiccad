@@ -1,0 +1,152 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#000000">
+
+    <androidx.camera.view.PreviewView
+        android:id="@+id/previewView"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        app:implementationMode="performance"
+        app:scaleType="fillCenter" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top"
+        android:orientation="vertical"
+        android:padding="20dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="AUTO PERFECT"
+            android:textColor="#FFFFFF"
+            android:textSize="23sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/sceneText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="5dp"
+            android:text="A analisar a cena…"
+            android:textColor="#FFFFFF"
+            android:textSize="14sp" />
+
+        <TextView
+            android:id="@+id/scoreText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="3dp"
+            android:text="Perfect Score: --"
+            android:textColor="#FFFFFF"
+            android:textSize="14sp" />
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <Button
+                android:id="@+id/aiButton"
+                android:layout_width="wrap_content"
+                android:layout_height="44dp"
+                android:backgroundTint="#AA111111"
+                android:text="IA OpenAI"
+                android:textAllCaps="false"
+                android:textColor="#FFFFFF" />
+
+            <TextView
+                android:id="@+id/aiStatusText"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="10dp"
+                android:text="IA desligada"
+                android:textColor="#FFFFFF"
+                android:textSize="13sp" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:gravity="center"
+        android:orientation="vertical"
+        android:paddingBottom="30dp">
+
+        <TextView
+            android:id="@+id/statusText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="10dp"
+            android:background="#77000000"
+            android:paddingHorizontal="14dp"
+            android:paddingVertical="8dp"
+            android:text="Pronto"
+            android:textColor="#FFFFFF"
+            android:textSize="14sp" />
+
+        <TextView
+            android:id="@+id/zoomText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="6dp"
+            android:background="#66000000"
+            android:paddingHorizontal="12dp"
+            android:paddingVertical="5dp"
+            android:text="1.0×"
+            android:textColor="#FFFFFF"
+            android:textSize="15sp"
+            android:textStyle="bold" />
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="12dp"
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/zoom1Button"
+                android:layout_width="58dp"
+                android:layout_height="46dp"
+                android:layout_marginHorizontal="4dp"
+                android:backgroundTint="#77000000"
+                android:text="1×"
+                android:textColor="#FFFFFF" />
+
+            <Button
+                android:id="@+id/zoom2Button"
+                android:layout_width="58dp"
+                android:layout_height="46dp"
+                android:layout_marginHorizontal="4dp"
+                android:backgroundTint="#77000000"
+                android:text="2×"
+                android:textColor="#FFFFFF" />
+
+            <Button
+                android:id="@+id/zoom4Button"
+                android:layout_width="58dp"
+                android:layout_height="46dp"
+                android:layout_marginHorizontal="4dp"
+                android:backgroundTint="#77000000"
+                android:text="4×"
+                android:textColor="#FFFFFF" />
+        </LinearLayout>
+
+        <Button
+            android:id="@+id/captureButton"
+            android:layout_width="100dp"
+            android:layout_height="100dp"
+            android:backgroundTint="#FFFFFF"
+            android:text="●"
+            android:textColor="#000000"
+            android:textSize="42sp" />
+    </LinearLayout>
+
+</FrameLayout>
